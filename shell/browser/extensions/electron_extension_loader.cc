@@ -131,6 +131,36 @@ void ElectronExtensionLoader::UnloadExtension(
   extension_registrar_.RemoveExtension(extension_id, reason);
 }
 
+void ElectronExtensionLoader::UninstallExtension(
+    // "transient" because the process of uninstalling may cause the reference
+    // to become invalid. Instead, use |extension->id()|.
+    const std::string& transient_extension_id){
+  scoped_refptr<const Extension> extension =
+    registry_->GetInstalledExtension(transient_extension_id);
+
+  base::FilePath deletion_dir =
+    is_unpacked_location ? extension->path() : extension->path().DirName();
+
+  InstallVerifier::Get(GetBrowserContext())->Remove(extension->id());
+  UnloadExtension(extension->id(), UnloadedExtensionReason::UNINSTALL);
+
+  !GetExtensionFileTaskRunner()->PostTaskAndReply(
+    FROM_HERE,
+    base::BindOnce(&ExtensionService::UninstallExtensionOnFileThread,
+                    extension->id(), profile_->GetProfileUserName(),
+                    /*extensions_install_dir=*/
+                    is_unpacked_location ? unpacked_install_directory_
+                                        : install_directory_,
+                    /*extension_dir_to_delete=*/std::move(deletion_dir),
+                    profile_->GetPath()),
+    subtask_done_callback)
+
+          
+  DataDeleter::StartDeleting(profile_, extension.get(), subtask_done_callback);
+
+  extension_registrar_.UntrackTerminatedExtension(extension->id());
+}
+
 void ElectronExtensionLoader::FinishExtensionLoad(
     base::OnceCallback<void(const Extension*, const std::string&)> cb,
     std::pair<scoped_refptr<const Extension>, std::string> result) {

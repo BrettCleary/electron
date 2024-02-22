@@ -56,6 +56,8 @@ class ElectronExtensionLoader : public ExtensionRegistrar::Delegate {
 
   ExtensionRegistrar* registrar() { return &extension_registrar_; }
 
+  void UninstallExtension(const std::string& transient_extension_id);
+
  private:
   // If the extension loaded successfully, enables it. If it's an app, launches
   // it. If the load failed, updates ShellKeepAliveRequester.
