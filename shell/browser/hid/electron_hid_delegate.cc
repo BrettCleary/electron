@@ -7,13 +7,13 @@
 #include <string>
 #include <utility>
 
-#include "base/command_line.h"
 #include "base/containers/contains.h"
 #include "base/scoped_observation.h"
 #include "chrome/common/chrome_features.h"
 #include "content/public/browser/web_contents.h"
 #include "electron/buildflags/buildflags.h"
 #include "services/device/public/cpp/hid/hid_switches.h"
+#include "shell/browser/electron_browser_context.h"
 #include "shell/browser/electron_permission_manager.h"
 #include "shell/browser/hid/hid_chooser_context.h"
 #include "shell/browser/hid/hid_chooser_context_factory.h"
@@ -41,13 +41,13 @@ namespace electron {
 
 // Manages the HidDelegate observers for a single browser context.
 class ElectronHidDelegate::ContextObservation
-    : public HidChooserContext::DeviceObserver {
+    : private HidChooserContext::DeviceObserver {
  public:
   ContextObservation(ElectronHidDelegate* parent,
                      content::BrowserContext* browser_context)
       : parent_(parent), browser_context_(browser_context) {
-    auto* chooser_context = GetChooserContext(browser_context_);
-    device_observation_.Observe(chooser_context);
+    if (auto* chooser_context = GetChooserContext(browser_context_))
+      device_observation_.Observe(chooser_context);
   }
 
   ContextObservation(ContextObservation&) = delete;
@@ -151,6 +151,7 @@ bool ElectronHidDelegate::CanRequestDevicePermission(
 
 bool ElectronHidDelegate::HasDevicePermission(
     content::BrowserContext* browser_context,
+    content::RenderFrameHost* render_frame_host,
     const url::Origin& origin,
     const device::mojom::HidDeviceInfo& device) {
   return browser_context && GetChooserContext(browser_context)
@@ -159,6 +160,7 @@ bool ElectronHidDelegate::HasDevicePermission(
 
 void ElectronHidDelegate::RevokeDevicePermission(
     content::BrowserContext* browser_context,
+    content::RenderFrameHost* render_frame_host,
     const url::Origin& origin,
     const device::mojom::HidDeviceInfo& device) {
   if (browser_context) {
@@ -210,9 +212,7 @@ bool ElectronHidDelegate::IsServiceWorkerAllowedForOrigin(
 #if BUILDFLAG(ENABLE_ELECTRON_EXTENSIONS)
   // WebHID is only available on extension service workers with feature flag
   // enabled for now.
-  if (base::FeatureList::IsEnabled(
-          features::kEnableWebHidOnExtensionServiceWorker) &&
-      origin.scheme() == extensions::kExtensionScheme)
+  if (origin.scheme() == extensions::kExtensionScheme)
     return true;
 #endif  // BUILDFLAG(ENABLE_ELECTRON_EXTENSIONS)
   return false;

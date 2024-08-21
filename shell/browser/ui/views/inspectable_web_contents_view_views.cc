@@ -14,6 +14,7 @@
 #include "shell/browser/ui/inspectable_web_contents_delegate.h"
 #include "shell/browser/ui/inspectable_web_contents_view_delegate.h"
 #include "ui/base/models/image_model.h"
+#include "ui/gfx/geometry/rounded_corners_f.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/controls/webview/webview.h"
 #include "ui/views/widget/widget.h"
@@ -88,14 +89,14 @@ InspectableWebContentsViewViews::InspectableWebContentsViewViews(
     auto* contents_web_view = new views::WebView(nullptr);
     contents_web_view->SetWebContents(
         inspectable_web_contents_->GetWebContents());
-    contents_web_view_ = contents_web_view;
+    contents_view_ = contents_web_view_ = contents_web_view;
   } else {
-    contents_web_view_ = new views::Label(u"No content under offscreen mode");
+    contents_view_ = new views::Label(u"No content under offscreen mode");
   }
 
   devtools_web_view_->SetVisible(false);
   AddChildView(devtools_web_view_.get());
-  AddChildView(contents_web_view_.get());
+  AddChildView(contents_view_.get());
 }
 
 InspectableWebContentsViewViews::~InspectableWebContentsViewViews() {
@@ -106,6 +107,15 @@ InspectableWebContentsViewViews::~InspectableWebContentsViewViews() {
 
 views::View* InspectableWebContentsViewViews::GetView() {
   return this;
+}
+
+void InspectableWebContentsViewViews::SetCornerRadii(
+    const gfx::RoundedCornersF& corner_radii) {
+  // WebView won't exist for offscreen rendering.
+  if (contents_web_view_) {
+    contents_web_view_->holder()->SetCornerRadii(
+        gfx::RoundedCornersF(corner_radii));
+  }
 }
 
 void InspectableWebContentsViewViews::ShowDevTools(bool activate) {
@@ -178,7 +188,8 @@ void InspectableWebContentsViewViews::SetIsDocked(bool docked, bool activate) {
     devtools_window_delegate_ = new DevToolsWindowDelegate(
         this, devtools_window_web_view_, devtools_window_.get());
 
-    views::Widget::InitParams params;
+    views::Widget::InitParams params{
+        views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET};
     params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
     params.delegate = devtools_window_delegate_;
     params.bounds = inspectable_web_contents()->dev_tools_bounds();
@@ -217,7 +228,7 @@ const std::u16string InspectableWebContentsViewViews::GetTitle() {
 
 void InspectableWebContentsViewViews::Layout(PassKey) {
   if (!devtools_web_view_->GetVisible()) {
-    contents_web_view_->SetBoundsRect(GetContentsBounds());
+    contents_view_->SetBoundsRect(GetContentsBounds());
     // Propagate layout call to all children, for example browser views.
     LayoutSuperclass<View>(this);
     return;
@@ -235,7 +246,7 @@ void InspectableWebContentsViewViews::Layout(PassKey) {
   new_contents_bounds.set_x(GetMirroredXForRect(new_contents_bounds));
 
   devtools_web_view_->SetBoundsRect(new_devtools_bounds);
-  contents_web_view_->SetBoundsRect(new_contents_bounds);
+  contents_view_->SetBoundsRect(new_contents_bounds);
 
   // Propagate layout call to all children, for example browser views.
   LayoutSuperclass<View>(this);

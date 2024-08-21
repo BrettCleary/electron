@@ -12,6 +12,8 @@
 #include "media/capture/mojom/video_capture_types.mojom.h"
 #include "services/viz/privileged/mojom/compositing/frame_sink_video_capture.mojom-shared.h"
 #include "shell/browser/osr/osr_render_widget_host_view.h"
+#include "third_party/skia/include/core/SkImageInfo.h"
+#include "third_party/skia/include/core/SkRegion.h"
 #include "ui/gfx/skbitmap_operations.h"
 
 namespace {
@@ -120,7 +122,7 @@ void OffScreenVideoConsumer::OnFrameCaptured(
       SkImageInfo::MakeN32(content_rect.width(), content_rect.height(),
                            kPremul_SkAlphaType),
       pixels,
-      media::VideoFrame::RowBytes(media::VideoFrame::kARGBPlane,
+      media::VideoFrame::RowBytes(media::VideoFrame::Plane::kARGB,
                                   info->pixel_format, info->coded_size.width()),
       [](void* addr, void* context) {
         delete static_cast<FramePinner*>(context);
@@ -135,15 +137,6 @@ void OffScreenVideoConsumer::OnFrameCaptured(
 
   callback_.Run(*update_rect, bitmap);
 }
-
-void OffScreenVideoConsumer::OnNewSubCaptureTargetVersion(
-    uint32_t crop_version) {}
-
-void OffScreenVideoConsumer::OnFrameWithEmptyRegionCapture() {}
-
-void OffScreenVideoConsumer::OnStopped() {}
-
-void OffScreenVideoConsumer::OnLog(const std::string& message) {}
 
 bool OffScreenVideoConsumer::CheckContentRect(const gfx::Rect& content_rect) {
   gfx::Size view_size = view_->SizeInPixels();

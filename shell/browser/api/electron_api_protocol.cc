@@ -8,9 +8,9 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/stl_util.h"
 #include "content/common/url_schemes.h"
 #include "content/public/browser/child_process_security_policy.h"
+#include "gin/handle.h"
 #include "gin/object_template_builder.h"
 #include "shell/browser/browser.h"
 #include "shell/browser/electron_browser_context.h"
@@ -232,7 +232,7 @@ bool Protocol::UnregisterProtocol(const std::string& scheme,
 }
 
 bool Protocol::IsProtocolRegistered(const std::string& scheme) {
-  return protocol_registry_->IsProtocolRegistered(scheme);
+  return protocol_registry_->FindRegistered(scheme) != nullptr;
 }
 
 ProtocolError Protocol::InterceptProtocol(ProtocolType type,
@@ -251,7 +251,7 @@ bool Protocol::UninterceptProtocol(const std::string& scheme,
 }
 
 bool Protocol::IsProtocolIntercepted(const std::string& scheme) {
-  return protocol_registry_->IsProtocolIntercepted(scheme);
+  return protocol_registry_->FindIntercepted(scheme) != nullptr;
 }
 
 v8::Local<v8::Promise> Protocol::IsProtocolHandled(const std::string& scheme,

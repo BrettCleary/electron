@@ -5,23 +5,21 @@
 
 #include "shell/browser/ui/inspectable_web_contents.h"
 
+#include <algorithm>
 #include <memory>
 #include <string_view>
 #include <utility>
 
+#include <string_view>
 #include "base/base64.h"
-#include "base/json/json_reader.h"
-#include "base/json/json_writer.h"
-#include "base/json/string_escape.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram.h"
-#include "base/ranges/algorithm.h"
-#include "base/stl_util.h"
 #include "base/strings/pattern.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/timer/timer.h"
 #include "base/uuid.h"
 #include "base/values.h"
 #include "chrome/browser/devtools/devtools_contents_resizing_strategy.h"
@@ -30,7 +28,6 @@
 #include "components/prefs/scoped_user_pref_update.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/file_select_listener.h"
 #include "content/public/browser/file_url_loader.h"
 #include "content/public/browser/host_zoom_map.h"
@@ -67,7 +64,6 @@
 #include "content/public/browser/render_process_host.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/permissions/permissions_data.h"
-#include "shell/browser/electron_browser_context.h"
 #endif
 
 namespace electron {
@@ -115,10 +111,10 @@ gfx::Rect DictionaryToRect(const base::Value::Dict& dict) {
 }
 
 bool IsPointInScreen(const gfx::Point& point) {
-  return base::ranges::any_of(display::Screen::GetScreen()->GetAllDisplays(),
-                              [&point](auto const& display) {
-                                return display.bounds().Contains(point);
-                              });
+  return std::ranges::any_of(display::Screen::GetScreen()->GetAllDisplays(),
+                             [&point](auto const& display) {
+                               return display.bounds().Contains(point);
+                             });
 }
 
 void SetZoomLevelForWebContents(content::WebContents* web_contents,
@@ -127,15 +123,15 @@ void SetZoomLevelForWebContents(content::WebContents* web_contents,
 }
 
 double GetNextZoomLevel(double level, bool out) {
-  double factor = blink::PageZoomLevelToZoomFactor(level);
+  double factor = blink::ZoomLevelToZoomFactor(level);
   size_t size = std::size(kPresetZoomFactors);
   for (size_t i = 0; i < size; ++i) {
-    if (!blink::PageZoomValuesEqual(kPresetZoomFactors[i], factor))
+    if (!blink::ZoomValuesEqual(kPresetZoomFactors[i], factor))
       continue;
     if (out && i > 0)
-      return blink::PageZoomFactorToZoomLevel(kPresetZoomFactors[i - 1]);
+      return blink::ZoomFactorToZoomLevel(kPresetZoomFactors[i - 1]);
     if (!out && i != size - 1)
-      return blink::PageZoomFactorToZoomLevel(kPresetZoomFactors[i + 1]);
+      return blink::ZoomFactorToZoomLevel(kPresetZoomFactors[i + 1]);
   }
   return level;
 }
@@ -242,7 +238,8 @@ class InspectableWebContents::NetworkResourceLoader
     response_headers_ = response_head.headers;
   }
 
-  void OnDataReceived(base::StringPiece chunk,
+  // network::SimpleURLLoaderStreamConsumer
+  void OnDataReceived(std::string_view chunk,
                       base::OnceClosure resume) override {
     bool encoded = !base::IsStringUTF8(chunk);
     bindings_->CallClientFunction(
@@ -631,8 +628,6 @@ void InspectableWebContents::SetInspectedPageBounds(const gfx::Rect& rect) {
     view_->SetContentsResizingStrategy(DevToolsContentsResizingStrategy{rect});
 }
 
-void InspectableWebContents::InspectElementCompleted() {}
-
 void InspectableWebContents::InspectedURLChanged(const std::string& url) {
   if (managed_devtools_web_contents_) {
     if (devtools_title_.empty()) {
@@ -679,7 +674,7 @@ void InspectableWebContents::LoadNetworkResource(DispatchCallback callback,
   resource_request.site_for_cookies = net::SiteForCookies::FromUrl(gurl);
   resource_request.headers.AddHeadersFromString(headers);
 
-  auto* protocol_registry = ProtocolRegistry::FromBrowserContext(
+  const auto* const protocol_registry = ProtocolRegistry::FromBrowserContext(
       GetDevToolsWebContents()->GetBrowserContext());
   NetworkResourceLoader::URLLoaderFactoryHolder url_loader_factory;
   if (gurl.SchemeIsFile()) {
@@ -688,14 +683,12 @@ void InspectableWebContents::LoadNetworkResource(DispatchCallback callback,
     url_loader_factory = network::SharedURLLoaderFactory::Create(
         std::make_unique<network::WrapperPendingSharedURLLoaderFactory>(
             std::move(pending_remote)));
-  } else if (protocol_registry->IsProtocolRegistered(gurl.scheme())) {
-    auto& protocol_handler = protocol_registry->handlers().at(gurl.scheme());
-    mojo::PendingRemote<network::mojom::URLLoaderFactory> pending_remote =
-        ElectronURLLoaderFactory::Create(protocol_handler.first,
-                                         protocol_handler.second);
+  } else if (const auto* const protocol_handler =
+                 protocol_registry->FindRegistered(gurl.scheme())) {
     url_loader_factory = network::SharedURLLoaderFactory::Create(
         std::make_unique<network::WrapperPendingSharedURLLoaderFactory>(
-            std::move(pending_remote)));
+            ElectronURLLoaderFactory::Create(protocol_handler->first,
+                                             protocol_handler->second)));
   } else {
     auto* partition = GetDevToolsWebContents()
                           ->GetBrowserContext()
@@ -721,6 +714,12 @@ void InspectableWebContents::OpenInNewTab(const std::string& url) {
     delegate_->DevToolsOpenInNewTab(url);
 }
 
+void InspectableWebContents::OpenSearchResultsInNewTab(
+    const std::string& query) {
+  if (delegate_)
+    delegate_->DevToolsOpenSearchResultsInNewTab(query);
+}
+
 void InspectableWebContents::ShowItemInFolder(
     const std::string& file_system_path) {
   if (file_system_path.empty())
@@ -733,9 +732,10 @@ void InspectableWebContents::ShowItemInFolder(
 
 void InspectableWebContents::SaveToFile(const std::string& url,
                                         const std::string& content,
-                                        bool save_as) {
+                                        bool save_as,
+                                        bool is_base64) {
   if (delegate_)
-    delegate_->DevToolsSaveToFile(url, content, save_as);
+    delegate_->DevToolsSaveToFile(url, content, save_as, is_base64);
 }
 
 void InspectableWebContents::AppendToFile(const std::string& url,
@@ -761,9 +761,6 @@ void InspectableWebContents::RemoveFileSystem(
         base::FilePath::FromUTF8Unsafe(file_system_path));
 }
 
-void InspectableWebContents::UpgradeDraggedFileSystemPermissions(
-    const std::string& file_system_url) {}
-
 void InspectableWebContents::IndexPath(int request_id,
                                        const std::string& file_system_path,
                                        const std::string& excluded_folders) {
@@ -784,16 +781,10 @@ void InspectableWebContents::SearchInPath(int request_id,
     delegate_->DevToolsSearchInPath(request_id, file_system_path, query);
 }
 
-void InspectableWebContents::SetWhitelistedShortcuts(
-    const std::string& message) {}
-
 void InspectableWebContents::SetEyeDropperActive(bool active) {
   if (delegate_)
     delegate_->DevToolsSetEyeDropperActive(active);
 }
-void InspectableWebContents::ShowCertificateViewer(
-    const std::string& cert_chain) {}
-
 void InspectableWebContents::ZoomIn() {
   double new_level = GetNextZoomLevel(GetDevToolsZoomLevel(), false);
   SetZoomLevelForWebContents(GetDevToolsWebContents(), new_level);
@@ -810,20 +801,6 @@ void InspectableWebContents::ResetZoom() {
   SetZoomLevelForWebContents(GetDevToolsWebContents(), 0.);
   UpdateDevToolsZoomLevel(0.);
 }
-
-void InspectableWebContents::SetDevicesDiscoveryConfig(
-    bool discover_usb_devices,
-    bool port_forwarding_enabled,
-    const std::string& port_forwarding_config,
-    bool network_discovery_enabled,
-    const std::string& network_discovery_config) {}
-
-void InspectableWebContents::SetDevicesUpdatesEnabled(bool enabled) {}
-
-void InspectableWebContents::OpenRemotePage(const std::string& browser_id,
-                                            const std::string& url) {}
-
-void InspectableWebContents::OpenNodeFrontend() {}
 
 void InspectableWebContents::DispatchProtocolMessageFromDevToolsFrontend(
     const std::string& message) {
@@ -888,7 +865,11 @@ void InspectableWebContents::GetSyncInformation(DispatchCallback callback) {
   std::move(callback).Run(&result);
 }
 
-void InspectableWebContents::ConnectionReady() {}
+void InspectableWebContents::GetHostConfig(DispatchCallback callback) {
+  base::Value::Dict response_dict;
+  base::Value response = base::Value(std::move(response_dict));
+  std::move(callback).Run(&response);
+}
 
 void InspectableWebContents::RegisterExtensionsAPI(const std::string& origin,
                                                    const std::string& script) {
@@ -936,7 +917,7 @@ void InspectableWebContents::DispatchProtocolMessage(
     size_t total_size = str_message.length();
     for (size_t pos = 0; pos < str_message.length();
          pos += kMaxMessageChunkSize) {
-      base::StringPiece str_message_chunk =
+      std::string_view str_message_chunk =
           str_message.substr(pos, kMaxMessageChunkSize);
 
       CallClientFunction(
@@ -946,9 +927,6 @@ void InspectableWebContents::DispatchProtocolMessage(
     }
   }
 }
-
-void InspectableWebContents::AgentHostClosed(
-    content::DevToolsAgentHost* agent_host) {}
 
 void InspectableWebContents::RenderFrameHostChanged(
     content::RenderFrameHost* old_host,
@@ -978,7 +956,7 @@ void InspectableWebContents::WebContentsDestroyed() {
 
 bool InspectableWebContents::HandleKeyboardEvent(
     content::WebContents* source,
-    const content::NativeWebKeyboardEvent& event) {
+    const input::NativeWebKeyboardEvent& event) {
   auto* delegate = web_contents_->GetDelegate();
   return !delegate || delegate->HandleKeyboardEvent(source, event);
 }

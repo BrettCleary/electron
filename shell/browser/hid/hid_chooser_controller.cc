@@ -4,17 +4,19 @@
 
 #include "shell/browser/hid/hid_chooser_controller.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "base/command_line.h"
 #include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/ranges/algorithm.h"
-#include "base/stl_util.h"
+#include "content/public/browser/web_contents.h"
 #include "gin/data_object_builder.h"
 #include "services/device/public/cpp/hid/hid_blocklist.h"
 #include "services/device/public/cpp/hid/hid_switches.h"
 #include "shell/browser/api/electron_api_session.h"
+#include "shell/browser/hid/electron_hid_delegate.h"
 #include "shell/browser/hid/hid_chooser_context.h"
 #include "shell/browser/hid/hid_chooser_context_factory.h"
 #include "shell/browser/javascript_environment.h"
@@ -22,7 +24,6 @@
 #include "shell/common/gin_converters/content_converter.h"
 #include "shell/common/gin_converters/hid_device_info_converter.h"
 #include "shell/common/gin_converters/value_converter.h"
-#include "shell/common/gin_helper/dictionary.h"
 #include "shell/common/node_includes.h"
 #include "shell/common/process_util.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -350,7 +351,7 @@ bool HidChooserController::RemoveDeviceInfo(
   auto find_it = device_map_.find(id);
   DCHECK(find_it != device_map_.end());
   auto& device_infos = find_it->second;
-  base::EraseIf(device_infos,
+  std::erase_if(device_infos,
                 [&device](const device::mojom::HidDeviceInfoPtr& d) {
                   return d->guid == device.guid;
                 });
@@ -358,7 +359,7 @@ bool HidChooserController::RemoveDeviceInfo(
     return false;
   // A device was disconnected. Remove it from the chooser list.
   device_map_.erase(find_it);
-  base::Erase(items_, id);
+  std::erase(items_, id);
   return true;
 }
 
@@ -368,8 +369,8 @@ void HidChooserController::UpdateDeviceInfo(
   auto physical_device_it = device_map_.find(id);
   DCHECK(physical_device_it != device_map_.end());
   auto& device_infos = physical_device_it->second;
-  auto device_it = base::ranges::find(device_infos, device.guid,
-                                      &device::mojom::HidDeviceInfo::guid);
+  auto device_it = std::ranges::find(device_infos, device.guid,
+                                     &device::mojom::HidDeviceInfo::guid);
   DCHECK(device_it != device_infos.end());
   *device_it = device.Clone();
 }

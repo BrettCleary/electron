@@ -7,9 +7,13 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "content/public/app/content_main_delegate.h"
-#include "content/public/common/content_client.h"
+
+namespace content {
+class Client;
+}
 
 namespace tracing {
 class TracingSamplerProfiler;
@@ -30,10 +34,9 @@ class ElectronMainDelegate : public content::ContentMainDelegate {
   ElectronMainDelegate(const ElectronMainDelegate&) = delete;
   ElectronMainDelegate& operator=(const ElectronMainDelegate&) = delete;
 
-  base::StringPiece GetBrowserV8SnapshotFilename() override;
-
  protected:
   // content::ContentMainDelegate:
+  std::string_view GetBrowserV8SnapshotFilename() override;
   std::optional<int> BasicStartupComplete() override;
   void PreSandboxStartup() override;
   void SandboxInitialized(const std::string& process_type) override;

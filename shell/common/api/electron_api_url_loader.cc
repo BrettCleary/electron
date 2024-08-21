@@ -14,6 +14,7 @@
 #include "base/containers/fixed_flat_map.h"
 #include "base/memory/raw_ptr.h"
 #include "base/no_destructor.h"
+#include "base/notreached.h"
 #include "base/sequence_checker.h"
 #include "base/strings/string_number_conversions.h"
 #include "gin/handle.h"
@@ -21,6 +22,7 @@
 #include "gin/wrappable.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/system/data_pipe_producer.h"
+#include "net/base/auth.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_util.h"
 #include "net/url_request/redirect_util.h"
@@ -151,7 +153,7 @@ class BufferDataSource : public mojo::DataPipeProducer::DataSource {
       }
       result.bytes_read = copyable_size;
     } else {
-      NOTREACHED();
+      NOTREACHED_IN_MIGRATION();
       result.result = MOJO_RESULT_OUT_OF_RANGE;
     }
     return result;
@@ -181,6 +183,8 @@ class JSChunkedDataPipeGetter : public gin::Wrappable<JSChunkedDataPipeGetter>,
         .SetMethod("write", &JSChunkedDataPipeGetter::WriteChunk)
         .SetMethod("done", &JSChunkedDataPipeGetter::Done);
   }
+
+  const char* GetTypeName() override { return "JSChunkedDataPipeGetter"; }
 
   static gin::WrapperInfo kWrapperInfo;
   ~JSChunkedDataPipeGetter() override = default;
@@ -331,13 +335,21 @@ SimpleURLLoaderWrapper::SimpleURLLoaderWrapper(
   DETACH_FROM_SEQUENCE(sequence_checker_);
   if (!request_->trusted_params)
     request_->trusted_params = network::ResourceRequest::TrustedParams();
-  mojo::PendingRemote<network::mojom::URLLoaderNetworkServiceObserver>
-      url_loader_network_observer_remote;
-  url_loader_network_observer_receivers_.Add(
-      this,
-      url_loader_network_observer_remote.InitWithNewPipeAndPassReceiver());
-  request_->trusted_params->url_loader_network_observer =
-      std::move(url_loader_network_observer_remote);
+  bool create_network_observer = true;
+  if (electron::IsUtilityProcess()) {
+    create_network_observer =
+        !URLLoaderBundle::GetInstance()
+             ->ShouldUseNetworkObserverfromURLLoaderFactory();
+  }
+  if (create_network_observer) {
+    mojo::PendingRemote<network::mojom::URLLoaderNetworkServiceObserver>
+        url_loader_network_observer_remote;
+    url_loader_network_observer_receivers_.Add(
+        this,
+        url_loader_network_observer_remote.InitWithNewPipeAndPassReceiver());
+    request_->trusted_params->url_loader_network_observer =
+        std::move(url_loader_network_observer_remote);
+  }
   // Chromium filters headers using browser rules, while for net module we have
   // every header passed. The following setting will allow us to capture the
   // raw headers in the URLLoader.
@@ -395,7 +407,7 @@ SimpleURLLoaderWrapper::~SimpleURLLoaderWrapper() = default;
 
 void SimpleURLLoaderWrapper::OnAuthRequired(
     const std::optional<base::UnguessableToken>& window_id,
-    uint32_t request_id,
+    int32_t request_id,
     const GURL& url,
     bool first_auth_attempt,
     const net::AuthChallengeInfo& auth_info,
@@ -471,47 +483,43 @@ void SimpleURLLoaderWrapper::Cancel() {
 }
 scoped_refptr<network::SharedURLLoaderFactory>
 SimpleURLLoaderWrapper::GetURLLoaderFactoryForURL(const GURL& url) {
-  if (electron::IsUtilityProcess()) {
+  if (electron::IsUtilityProcess())
     return URLLoaderBundle::GetInstance()->GetSharedURLLoaderFactory();
-  }
+
   CHECK(browser_context_);
-  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory;
-  auto* protocol_registry =
-      ProtocolRegistry::FromBrowserContext(browser_context_);
   // Explicitly handle intercepted protocols here, even though
   // ProxyingURLLoaderFactory would handle them later on, so that we can
   // correctly intercept file:// scheme URLs.
-  bool bypass_custom_protocol_handlers =
-      request_options_ & kBypassCustomProtocolHandlers;
-  if (!bypass_custom_protocol_handlers &&
-      protocol_registry->IsProtocolIntercepted(url.scheme())) {
-    auto& protocol_handler =
-        protocol_registry->intercept_handlers().at(url.scheme());
-    mojo::PendingRemote<network::mojom::URLLoaderFactory> pending_remote =
-        ElectronURLLoaderFactory::Create(protocol_handler.first,
-                                         protocol_handler.second);
-    url_loader_factory = network::SharedURLLoaderFactory::Create(
-        std::make_unique<network::WrapperPendingSharedURLLoaderFactory>(
-            std::move(pending_remote)));
-  } else if (!bypass_custom_protocol_handlers &&
-             protocol_registry->IsProtocolRegistered(url.scheme())) {
-    auto& protocol_handler = protocol_registry->handlers().at(url.scheme());
-    mojo::PendingRemote<network::mojom::URLLoaderFactory> pending_remote =
-        ElectronURLLoaderFactory::Create(protocol_handler.first,
-                                         protocol_handler.second);
-    url_loader_factory = network::SharedURLLoaderFactory::Create(
-        std::make_unique<network::WrapperPendingSharedURLLoaderFactory>(
-            std::move(pending_remote)));
-  } else if (url.SchemeIsFile()) {
-    mojo::PendingRemote<network::mojom::URLLoaderFactory> pending_remote =
-        AsarURLLoaderFactory::Create();
-    url_loader_factory = network::SharedURLLoaderFactory::Create(
-        std::make_unique<network::WrapperPendingSharedURLLoaderFactory>(
-            std::move(pending_remote)));
-  } else {
-    url_loader_factory = browser_context_->GetURLLoaderFactory();
+  if (const bool bypass = request_options_ & kBypassCustomProtocolHandlers;
+      !bypass) {
+    const auto scheme = url.scheme();
+    const auto* const protocol_registry =
+        ProtocolRegistry::FromBrowserContext(browser_context_);
+
+    if (const auto* const protocol_handler =
+            protocol_registry->FindIntercepted(scheme)) {
+      return network::SharedURLLoaderFactory::Create(
+          std::make_unique<network::WrapperPendingSharedURLLoaderFactory>(
+              ElectronURLLoaderFactory::Create(protocol_handler->first,
+                                               protocol_handler->second)));
+    }
+
+    if (const auto* const protocol_handler =
+            protocol_registry->FindRegistered(scheme)) {
+      return network::SharedURLLoaderFactory::Create(
+          std::make_unique<network::WrapperPendingSharedURLLoaderFactory>(
+              ElectronURLLoaderFactory::Create(protocol_handler->first,
+                                               protocol_handler->second)));
+    }
   }
-  return url_loader_factory;
+
+  if (url.SchemeIsFile()) {
+    return network::SharedURLLoaderFactory::Create(
+        std::make_unique<network::WrapperPendingSharedURLLoaderFactory>(
+            AsarURLLoaderFactory::Create()));
+  }
+
+  return browser_context_->GetURLLoaderFactory();
 }
 
 // static
@@ -696,14 +704,14 @@ gin::Handle<SimpleURLLoaderWrapper> SimpleURLLoaderWrapper::Create(
   return ret;
 }
 
-void SimpleURLLoaderWrapper::OnDataReceived(std::string_view string_piece,
+void SimpleURLLoaderWrapper::OnDataReceived(std::string_view string_view,
                                             base::OnceClosure resume) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
   v8::HandleScope handle_scope(isolate);
-  auto array_buffer = v8::ArrayBuffer::New(isolate, string_piece.size());
+  auto array_buffer = v8::ArrayBuffer::New(isolate, string_view.size());
   auto backing_store = array_buffer->GetBackingStore();
-  memcpy(backing_store->Data(), string_piece.data(), string_piece.size());
+  memcpy(backing_store->Data(), string_view.data(), string_view.size());
   Emit("data", array_buffer,
        base::AdaptCallbackForRepeating(std::move(resume)));
 }
@@ -718,8 +726,6 @@ void SimpleURLLoaderWrapper::OnComplete(bool success) {
   pinned_wrapper_.Reset();
   pinned_chunk_pipe_getter_.Reset();
 }
-
-void SimpleURLLoaderWrapper::OnRetry(base::OnceClosure start_retry) {}
 
 void SimpleURLLoaderWrapper::OnResponseStarted(
     const GURL& final_url,

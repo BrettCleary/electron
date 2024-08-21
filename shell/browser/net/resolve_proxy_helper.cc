@@ -14,6 +14,7 @@
 #include "net/proxy_resolution/proxy_info.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "shell/browser/electron_browser_context.h"
+#include "shell/browser/net/system_network_context_manager.h"
 
 using content::BrowserThread;
 
@@ -54,11 +55,18 @@ void ResolveProxyHelper::StartPendingRequest() {
   receiver_.set_disconnect_handler(
       base::BindOnce(&ResolveProxyHelper::OnProxyLookupComplete,
                      base::Unretained(this), net::ERR_ABORTED, std::nullopt));
-  browser_context_->GetDefaultStoragePartition()
-      ->GetNetworkContext()
-      ->LookUpProxyForURL(pending_requests_.front().url,
-                          net::NetworkAnonymizationKey(),
-                          std::move(proxy_lookup_client));
+  network::mojom::NetworkContext* network_context = nullptr;
+  if (browser_context_) {
+    network_context =
+        browser_context_->GetDefaultStoragePartition()->GetNetworkContext();
+  } else {
+    DCHECK(SystemNetworkContextManager::GetInstance());
+    network_context = SystemNetworkContextManager::GetInstance()->GetContext();
+  }
+  CHECK(network_context);
+  network_context->LookUpProxyForURL(pending_requests_.front().url,
+                                     net::NetworkAnonymizationKey(),
+                                     std::move(proxy_lookup_client));
 }
 
 void ResolveProxyHelper::OnProxyLookupComplete(

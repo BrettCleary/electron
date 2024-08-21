@@ -15,8 +15,7 @@
 #include "shell/browser/ui/views/win_frame_view.h"
 #include "shell/common/electron_constants.h"
 #include "ui/display/display.h"
-#include "ui/display/win/screen_win.h"
-#include "ui/gfx/geometry/insets.h"
+#include "ui/display/screen.h"
 #include "ui/gfx/geometry/resize_utils.h"
 #include "ui/views/widget/native_widget_private.h"
 
@@ -287,6 +286,15 @@ bool NativeWindowViews::PreHandleMSG(UINT message,
         Browser::Get()->OnAccessibilitySupportChanged();
       }
 
+      return false;
+    }
+    case WM_RBUTTONUP: {
+      if (!has_frame()) {
+        bool prevent_default = false;
+        NotifyWindowSystemContextMenu(GET_X_LPARAM(l_param),
+                                      GET_Y_LPARAM(l_param), &prevent_default);
+        return prevent_default;
+      }
       return false;
     }
     case WM_GETMINMAXINFO: {

@@ -12,8 +12,10 @@
 #include <string>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "electron/shell/common/api/api.mojom.h"
 #include "shell/browser/native_window.h"
+#include "third_party/skia/include/core/SkRegion.h"
 #include "ui/display/display_observer.h"
 #include "ui/native_theme/native_theme_observer.h"
 #include "ui/views/controls/native/native_view_host.h"
@@ -165,6 +167,7 @@ class NativeWindowMac : public NativeWindow,
   void DetachChildren() override;
 
   void NotifyWindowWillEnterFullScreen();
+  void NotifyWindowDidFailToEnterFullScreen();
   void NotifyWindowWillLeaveFullScreen();
 
   // Cleanup observers when window is getting closed. Note that the destructor
@@ -175,6 +178,8 @@ class NativeWindowMac : public NativeWindow,
   void UpdateVibrancyRadii(bool fullscreen);
 
   void UpdateWindowOriginalFrame();
+
+  bool IsPanel();
 
   // Set the attribute of NSWindow while work around a bug of zoom button.
   bool HasStyleMask(NSUInteger flag) const;
@@ -296,6 +301,9 @@ class NativeWindowMac : public NativeWindow,
   NSRect default_frame_for_zoom_;
 
   std::string vibrancy_type_;
+
+  // A views::NativeViewHost wrapping the vibrant view. Owned by the root view.
+  raw_ptr<views::NativeViewHost> vibrant_native_view_host_ = nullptr;
 
   // The presentation options before entering simple fullscreen mode.
   NSApplicationPresentationOptions simple_fullscreen_options_;

@@ -8,11 +8,8 @@
 #include <utility>
 
 #include "base/containers/contains.h"
-#include "base/logging.h"
 #include "base/path_service.h"
-#include "base/stl_util.h"
 #include "base/values.h"
-#include "build/build_config.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/grit/component_extension_resources_map.h"
 #include "electron/buildflags/buildflags.h"

@@ -5,9 +5,13 @@
 #ifndef ELECTRON_SHELL_COMMON_GIN_HELPER_EVENT_H_
 #define ELECTRON_SHELL_COMMON_GIN_HELPER_EVENT_H_
 
-#include "gin/handle.h"
 #include "gin/wrappable.h"
 #include "shell/common/gin_helper/constructible.h"
+
+namespace gin {
+template <typename T>
+class Handle;
+}  // namespace gin
 
 namespace v8 {
 class Isolate;
@@ -31,6 +35,7 @@ class Event : public gin::Wrappable<Event>,
 
   // gin::Wrappable
   static gin::WrapperInfo kWrapperInfo;
+  const char* GetTypeName() override;
 
   ~Event() override;
 

@@ -4,14 +4,13 @@
 
 #import "shell/browser/mac/electron_application_delegate.h"
 
-#include <memory>
 #include <string>
 
 #include "base/allocator/buildflags.h"
 #include "base/allocator/partition_allocator/src/partition_alloc/shim/allocator_shim.h"
+#include "base/functional/callback.h"
 #include "base/mac/mac_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/values.h"
 #include "shell/browser/api/electron_api_push_notifications.h"
 #include "shell/browser/browser.h"
 #include "shell/browser/mac/dict_util.h"
@@ -69,6 +68,11 @@ static NSDictionary* UNNotificationResponseToNSDictionary(
   electron::Browser::Get()->WillFinishLaunching();
 }
 
+// NSUserNotification is deprecated; all calls should be replaced with
+// UserNotifications.frameworks API
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
 - (void)applicationDidFinishLaunching:(NSNotification*)notify {
   NSObject* user_notification =
       [notify userInfo][NSApplicationLaunchUserNotificationKey];
@@ -84,9 +88,20 @@ static NSDictionary* UNNotificationResponseToNSDictionary(
     }
   }
 
+  NSAppleEventDescriptor* event =
+      NSAppleEventManager.sharedAppleEventManager.currentAppleEvent;
+  BOOL launched_as_login_item =
+      (event.eventID == kAEOpenApplication &&
+       [event paramDescriptorForKeyword:keyAEPropData].enumCodeValue ==
+           keyAELaunchedAsLogInItem);
+  electron::Browser::Get()->SetLaunchedAtLogin(launched_as_login_item);
+
   electron::Browser::Get()->DidFinishLaunching(
       electron::NSDictionaryToValue(notification_info));
 }
+
+// -Wdeprecated-declarations
+#pragma clang diagnostic pop
 
 - (void)applicationDidBecomeActive:(NSNotification*)notification {
   electron::Browser::Get()->DidBecomeActive();

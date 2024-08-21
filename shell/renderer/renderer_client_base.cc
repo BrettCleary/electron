@@ -28,6 +28,7 @@
 #include "shell/common/node_includes.h"
 #include "shell/common/node_util.h"
 #include "shell/common/options_switches.h"
+#include "shell/common/plugin.mojom.h"
 #include "shell/common/world_ids.h"
 #include "shell/renderer/api/context_bridge/object_cache.h"
 #include "shell/renderer/api/electron_api_context_bridge.h"
@@ -35,6 +36,7 @@
 #include "shell/renderer/content_settings_observer.h"
 #include "shell/renderer/electron_api_service_impl.h"
 #include "shell/renderer/electron_autofill_agent.h"
+#include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
 #include "third_party/blink/public/common/web_preferences/web_preferences.h"
 #include "third_party/blink/public/platform/web_runtime_features.h"
@@ -49,6 +51,10 @@
 #include "third_party/blink/renderer/platform/media/multi_buffer_data_source.h"  // nogncheck
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"  // nogncheck
 #include "third_party/widevine/cdm/buildflags.h"
+
+#if BUILDFLAG(ENABLE_PDF_VIEWER)
+#include "components/pdf/renderer/internal_plugin_renderer_helpers.h"
+#endif  // BUILDFLAG(ENABLE_PDF_VIEWER)
 
 #if BUILDFLAG(IS_MAC)
 #include "base/strings/sys_string_conversions.h"
@@ -68,15 +74,14 @@
 #endif
 
 #if BUILDFLAG(ENABLE_PDF_VIEWER)
-#include "chrome/common/pdf_util.h"
-#include "components/pdf/common/constants.h"
+#include "components/pdf/common/constants.h"  // nogncheck
+#include "components/pdf/common/pdf_util.h"   // nogncheck
 #include "components/pdf/renderer/pdf_internal_plugin_delegate.h"
 #include "shell/common/electron_constants.h"
 #endif  // BUILDFLAG(ENABLE_PDF_VIEWER)
 
 #if BUILDFLAG(ENABLE_PLUGINS)
 #include "shell/common/plugin_info.h"
-#include "shell/renderer/pepper_helper.h"
 #endif  // BUILDFLAG(ENABLE_PLUGINS)
 
 #if BUILDFLAG(ENABLE_PRINTING)
@@ -90,11 +95,13 @@
 #include "content/public/common/webplugininfo.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extensions_client.h"
+#include "extensions/renderer/api/core_extensions_renderer_api_provider.h"
 #include "extensions/renderer/dispatcher.h"
 #include "extensions/renderer/extension_frame_helper.h"
 #include "extensions/renderer/extension_web_view_helper.h"
 #include "extensions/renderer/guest_view/mime_handler_view/mime_handler_view_container_manager.h"
 #include "shell/common/extensions/electron_extensions_client.h"
+#include "shell/renderer/extensions/electron_extensions_renderer_api_provider.h"
 #include "shell/renderer/extensions/electron_extensions_renderer_client.h"
 #endif  // BUILDFLAG(ENABLE_ELECTRON_EXTENSIONS)
 
@@ -211,7 +218,7 @@ void RendererClientBase::BindProcess(v8::Isolate* isolate,
 }
 
 bool RendererClientBase::ShouldLoadPreload(
-    v8::Handle<v8::Context> context,
+    v8::Local<v8::Context> context,
     content::RenderFrame* render_frame) const {
   auto prefs = render_frame->GetBlinkPreferences();
   bool is_main_frame = render_frame->IsMainFrame();
@@ -235,16 +242,17 @@ void RendererClientBase::RenderThreadStarted() {
                                                      true);
 
 #if BUILDFLAG(ENABLE_ELECTRON_EXTENSIONS)
-  auto* thread = content::RenderThread::Get();
-
   extensions_client_.reset(CreateExtensionsClient());
   extensions::ExtensionsClient::Set(extensions_client_.get());
 
   extensions_renderer_client_ =
       std::make_unique<ElectronExtensionsRendererClient>();
+  extensions_renderer_client_->AddAPIProvider(
+      std::make_unique<extensions::CoreExtensionsRendererAPIProvider>());
+  extensions_renderer_client_->AddAPIProvider(
+      std::make_unique<ElectronExtensionsRendererAPIProvider>());
   extensions::ExtensionsRendererClient::Set(extensions_renderer_client_.get());
-
-  thread->AddObserver(extensions_renderer_client_->GetDispatcher());
+  extensions_renderer_client_->RenderThreadStarted();
 
   WTF::String extension_scheme(extensions::kExtensionScheme);
   // Extension resources are HTTP-like and safe to expose to the fetch API. The
@@ -322,9 +330,6 @@ void RendererClientBase::RenderFrameCreated(
   new AutofillAgent(render_frame,
                     render_frame->GetAssociatedInterfaceRegistry());
 #endif
-#if BUILDFLAG(ENABLE_PLUGINS)
-  new PepperHelper(render_frame);
-#endif
   new ContentSettingsObserver(render_frame);
 #if BUILDFLAG(ENABLE_PRINTING)
   new printing::PrintRenderFrameHelper(
@@ -337,7 +342,7 @@ void RendererClientBase::RenderFrameCreated(
   new ElectronApiServiceImpl(render_frame, this);
 
 #if BUILDFLAG(ENABLE_ELECTRON_EXTENSIONS)
-  auto* dispatcher = extensions_renderer_client_->GetDispatcher();
+  auto* dispatcher = extensions_renderer_client_->dispatcher();
   // ExtensionFrameHelper destroys itself when the RenderFrame is destroyed.
   new extensions::ExtensionFrameHelper(render_frame, dispatcher);
 
@@ -398,15 +403,6 @@ bool RendererClientBase::OverrideCreatePlugin(
   return true;
 }
 
-void RendererClientBase::GetSupportedKeySystems(
-    media::GetSupportedKeySystemsCB cb) {
-#if BUILDFLAG(ENABLE_WIDEVINE)
-  GetChromeKeySystems(std::move(cb));
-#else
-  std::move(cb).Run({});
-#endif
-}
-
 void RendererClientBase::DidSetUserAgent(const std::string& user_agent) {
 #if BUILDFLAG(ENABLE_PRINTING)
   printing::SetAgent(user_agent);
@@ -421,32 +417,29 @@ bool RendererClientBase::IsPluginHandledExternally(
 #if BUILDFLAG(ENABLE_PDF_VIEWER)
   DCHECK(plugin_element.HasHTMLTagName("object") ||
          plugin_element.HasHTMLTagName("embed"));
-  if (mime_type == pdf::kInternalPluginMimeType) {
+
+  mojo::AssociatedRemote<mojom::ElectronPluginInfoHost> plugin_info_host;
+  render_frame->GetRemoteAssociatedInterfaces()->GetInterface(
+      &plugin_info_host);
+  mojom::PluginInfoPtr plugin_info = mojom::PluginInfo::New();
+  plugin_info_host->GetPluginInfo(
+      original_url, render_frame->GetWebFrame()->Top()->GetSecurityOrigin(),
+      mime_type, &plugin_info);
+
+  if (plugin_info->actual_mime_type == pdf::kInternalPluginMimeType) {
     if (IsPdfInternalPluginAllowedOrigin(
             render_frame->GetWebFrame()->GetSecurityOrigin())) {
       return true;
     }
-
-    content::WebPluginInfo info;
-    info.type = content::WebPluginInfo::PLUGIN_TYPE_PEPPER_OUT_OF_PROCESS;
-    info.name = base::ASCIIToUTF16(kPDFInternalPluginName);
-    info.path = base::FilePath(kPdfPluginPath);
-    info.background_color = content::WebPluginInfo::kDefaultBackgroundColor;
-    info.mime_types.emplace_back(pdf::kInternalPluginMimeType, "pdf",
-                                 "Portable Document Format");
-    return extensions::MimeHandlerViewContainerManager::Get(
-               content::RenderFrame::FromWebFrame(
-                   plugin_element.GetDocument().GetFrame()),
-               true /* create_if_does_not_exist */)
-        ->CreateFrameContainer(plugin_element, original_url, mime_type, info);
   }
 
   return extensions::MimeHandlerViewContainerManager::Get(
              content::RenderFrame::FromWebFrame(
                  plugin_element.GetDocument().GetFrame()),
              true /* create_if_does_not_exist */)
-      ->CreateFrameContainer(plugin_element, original_url, mime_type,
-                             GetPDFPluginInfo());
+      ->CreateFrameContainer(plugin_element, original_url,
+                             plugin_info->actual_mime_type,
+                             plugin_info->plugin);
 #else
   return false;
 #endif
@@ -511,7 +504,7 @@ void RendererClientBase::DidInitializeServiceWorkerContextOnWorkerThread(
     const GURL& service_worker_scope,
     const GURL& script_url) {
 #if BUILDFLAG(ENABLE_ELECTRON_EXTENSIONS)
-  extensions_renderer_client_->GetDispatcher()
+  extensions_renderer_client_->dispatcher()
       ->DidInitializeServiceWorkerContextOnWorkerThread(
           context_proxy, service_worker_scope, script_url);
 #endif
@@ -522,12 +515,13 @@ void RendererClientBase::WillEvaluateServiceWorkerOnWorkerThread(
     v8::Local<v8::Context> v8_context,
     int64_t service_worker_version_id,
     const GURL& service_worker_scope,
-    const GURL& script_url) {
+    const GURL& script_url,
+    const blink::ServiceWorkerToken& service_worker_token) {
 #if BUILDFLAG(ENABLE_ELECTRON_EXTENSIONS)
-  extensions_renderer_client_->GetDispatcher()
+  extensions_renderer_client_->dispatcher()
       ->WillEvaluateServiceWorkerOnWorkerThread(
           context_proxy, v8_context, service_worker_version_id,
-          service_worker_scope, script_url);
+          service_worker_scope, script_url, service_worker_token);
 #endif
 }
 
@@ -536,7 +530,7 @@ void RendererClientBase::DidStartServiceWorkerContextOnWorkerThread(
     const GURL& service_worker_scope,
     const GURL& script_url) {
 #if BUILDFLAG(ENABLE_ELECTRON_EXTENSIONS)
-  extensions_renderer_client_->GetDispatcher()
+  extensions_renderer_client_->dispatcher()
       ->DidStartServiceWorkerContextOnWorkerThread(
           service_worker_version_id, service_worker_scope, script_url);
 #endif
@@ -548,7 +542,7 @@ void RendererClientBase::WillDestroyServiceWorkerContextOnWorkerThread(
     const GURL& service_worker_scope,
     const GURL& script_url) {
 #if BUILDFLAG(ENABLE_ELECTRON_EXTENSIONS)
-  extensions_renderer_client_->GetDispatcher()
+  extensions_renderer_client_->dispatcher()
       ->WillDestroyServiceWorkerContextOnWorkerThread(
           context, service_worker_version_id, service_worker_scope, script_url);
 #endif
@@ -581,7 +575,7 @@ extensions::ExtensionsClient* RendererClientBase::CreateExtensionsClient() {
 #endif
 
 bool RendererClientBase::IsWebViewFrame(
-    v8::Handle<v8::Context> context,
+    v8::Local<v8::Context> context,
     content::RenderFrame* render_frame) const {
   auto* isolate = context->GetIsolate();
 
@@ -602,7 +596,7 @@ bool RendererClientBase::IsWebViewFrame(
 }
 
 void RendererClientBase::SetupMainWorldOverrides(
-    v8::Handle<v8::Context> context,
+    v8::Local<v8::Context> context,
     content::RenderFrame* render_frame) {
   auto prefs = render_frame->GetBlinkPreferences();
   // We only need to run the isolated bundle if webview is enabled

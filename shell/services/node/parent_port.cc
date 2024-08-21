@@ -9,7 +9,9 @@
 #include "base/no_destructor.h"
 #include "gin/data_object_builder.h"
 #include "gin/handle.h"
+#include "gin/object_template_builder.h"
 #include "shell/browser/api/message_port.h"
+#include "shell/browser/javascript_environment.h"
 #include "shell/common/gin_helper/dictionary.h"
 #include "shell/common/gin_helper/event_emitter_caller.h"
 #include "shell/common/node_includes.h"
@@ -44,7 +46,13 @@ void ParentPort::PostMessage(v8::Local<v8::Value> message_value) {
   if (!connector_closed_ && connector_ && connector_->is_valid()) {
     v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
     blink::TransferableMessage transferable_message;
-    electron::SerializeV8Value(isolate, message_value, &transferable_message);
+
+    if (!electron::SerializeV8Value(isolate, message_value,
+                                    &transferable_message)) {
+      // SerializeV8Value sets an exception.
+      return;
+    }
+
     mojo::Message mojo_message =
         blink::mojom::TransferableMessage::WrapAsMessage(
             std::move(transferable_message));

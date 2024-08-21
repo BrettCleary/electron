@@ -7,8 +7,7 @@
 
 #include <vector>
 
-#include "build/build_config.h"
-#include "v8/include/v8.h"
+#include "v8/include/v8-forward.h"
 
 namespace node {
 class Environment;

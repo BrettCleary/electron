@@ -10,14 +10,24 @@
 
 #include "base/memory/raw_ptr.h"
 #include "electron/shell/common/api/api.mojom.h"
+
+#if defined(TOOLKIT_VIEWS) && !BUILDFLAG(IS_MAC)
+#include "ui/views/view.h"
+#else
 #include "ui/gfx/native_widget_types.h"
+#endif
 
 class DevToolsContentsResizingStrategy;
+
+namespace gfx {
+class RoundedCornersF;
+}  // namespace gfx
 
 #if defined(TOOLKIT_VIEWS)
 namespace views {
 class View;
-}
+class WebView;
+}  // namespace views
 #endif
 
 namespace electron {
@@ -49,6 +59,7 @@ class InspectableWebContentsView {
 #endif
 
   virtual void ShowDevTools(bool activate) = 0;
+  virtual void SetCornerRadii(const gfx::RoundedCornersF& corner_radii) = 0;
   // Hide the DevTools view.
   virtual void CloseDevTools() = 0;
   virtual bool IsDevToolsViewShowing() = 0;

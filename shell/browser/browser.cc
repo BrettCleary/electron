@@ -9,7 +9,6 @@
 #include <utility>
 
 #include "base/files/file_util.h"
-#include "base/no_destructor.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_runner.h"
@@ -17,15 +16,24 @@
 #include "chrome/common/chrome_paths.h"
 #include "shell/browser/browser_observer.h"
 #include "shell/browser/electron_browser_main_parts.h"
-#include "shell/browser/login_handler.h"
 #include "shell/browser/native_window.h"
 #include "shell/browser/window_list.h"
 #include "shell/common/application_info.h"
-#include "shell/common/electron_paths.h"
+#include "shell/common/gin_converters/login_item_settings_converter.h"
 #include "shell/common/gin_helper/arguments.h"
 #include "shell/common/thread_restrictions.h"
 
 namespace electron {
+
+LoginItemSettings::LoginItemSettings() = default;
+LoginItemSettings::~LoginItemSettings() = default;
+LoginItemSettings::LoginItemSettings(const LoginItemSettings& other) = default;
+
+#if BUILDFLAG(IS_WIN)
+LaunchItem::LaunchItem() = default;
+LaunchItem::~LaunchItem() = default;
+LaunchItem::LaunchItem(const LaunchItem& other) = default;
+#endif
 
 namespace {
 
@@ -43,23 +51,20 @@ void RunQuitClosure(base::OnceClosure quit) {
 
 }  // namespace
 
-#if BUILDFLAG(IS_WIN)
-Browser::LaunchItem::LaunchItem() = default;
-Browser::LaunchItem::~LaunchItem() = default;
-Browser::LaunchItem::LaunchItem(const LaunchItem& other) = default;
-#endif
-
-Browser::LoginItemSettings::LoginItemSettings() = default;
-Browser::LoginItemSettings::~LoginItemSettings() = default;
-Browser::LoginItemSettings::LoginItemSettings(const LoginItemSettings& other) =
-    default;
-
 Browser::Browser() {
   WindowList::AddObserver(this);
 }
 
 Browser::~Browser() {
   WindowList::RemoveObserver(this);
+}
+
+void Browser::AddObserver(BrowserObserver* obs) {
+  observers_.AddObserver(obs);
+}
+
+void Browser::RemoveObserver(BrowserObserver* obs) {
+  observers_.RemoveObserver(obs);
 }
 
 // static

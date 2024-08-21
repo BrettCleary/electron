@@ -4,15 +4,12 @@
 
 #include "shell/browser/ui/message_box.h"
 
-#include <string>
 #include <utility>
-#include <vector>
 
 #import <Cocoa/Cocoa.h>
 
 #include "base/containers/contains.h"
 #include "base/containers/flat_map.h"
-#include "base/functional/callback.h"
 #include "base/mac/mac_util.h"
 #include "base/no_destructor.h"
 #include "base/strings/sys_string_conversions.h"

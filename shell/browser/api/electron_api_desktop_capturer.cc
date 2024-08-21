@@ -17,6 +17,7 @@
 #include "chrome/browser/media/webrtc/thumbnail_capturer_mac.h"
 #include "chrome/browser/media/webrtc/window_icon_util.h"
 #include "content/public/browser/desktop_capture.h"
+#include "gin/handle.h"
 #include "gin/object_template_builder.h"
 #include "shell/browser/javascript_environment.h"
 #include "shell/common/api/electron_api_native_image.h"
@@ -39,6 +40,10 @@
 #include "ui/display/util/edid_parser.h"  // nogncheck
 #include "ui/gfx/x/atom_cache.h"
 #include "ui/gfx/x/randr.h"
+#endif
+
+#if BUILDFLAG(IS_MAC)
+#include "ui/base/cocoa/permissions_utils.h"
 #endif
 
 #if BUILDFLAG(IS_LINUX)
@@ -167,6 +172,16 @@ std::unique_ptr<ThumbnailCapturer> MakeScreenCapturer() {
                          : nullptr;
 }
 
+#if BUILDFLAG(IS_WIN)
+BOOL CALLBACK EnumDisplayMonitorsCallback(HMONITOR monitor,
+                                          HDC hdc,
+                                          LPRECT rect,
+                                          LPARAM data) {
+  reinterpret_cast<std::vector<HMONITOR>*>(data)->push_back(monitor);
+  return TRUE;
+}
+#endif
+
 }  // namespace
 
 namespace gin {
@@ -294,6 +309,13 @@ void DesktopCapturer::StartHandling(bool capture_window,
   capture_window_ = capture_window;
   capture_screen_ = capture_screen;
 
+#if BUILDFLAG(IS_MAC)
+  if (!ui::TryPromptUserForScreenCapture()) {
+    HandleFailure();
+    return;
+  }
+#endif
+
   {
     // Initialize the source list.
     // Apply the new thumbnail size and restart capture.
@@ -389,23 +411,38 @@ void DesktopCapturer::UpdateSourcesList(DesktopMediaList* list) {
     if (using_directx_capturer_) {
       std::vector<std::string> device_names;
       // Crucially, this list of device names will be in the same order as
-      // |media_list_sources|.
+      // |screen_sources|.
       if (!webrtc::DxgiDuplicatorController::Instance()->GetDeviceNames(
               &device_names)) {
         HandleFailure();
         return;
       }
+      DCHECK_EQ(device_names.size(), screen_sources.size());
+
+      std::vector<HMONITOR> monitors;
+      EnumDisplayMonitors(nullptr, nullptr, EnumDisplayMonitorsCallback,
+                          reinterpret_cast<LPARAM>(&monitors));
+
+      base::flat_map<std::string, int64_t> device_name_to_id;
+      device_name_to_id.reserve(monitors.size());
+      for (auto* monitor : monitors) {
+        MONITORINFOEX monitorInfo{{sizeof(MONITORINFOEX)}};
+        if (!GetMonitorInfo(monitor, &monitorInfo)) {
+          continue;
+        }
+
+        device_name_to_id[base::WideToUTF8(monitorInfo.szDevice)] =
+            display::win::internal::DisplayInfo::DisplayIdFromMonitorInfo(
+                monitorInfo);
+      }
 
       int device_name_index = 0;
       for (auto& source : screen_sources) {
         const auto& device_name = device_names[device_name_index++];
-        std::wstring wide_device_name;
-        base::UTF8ToWide(device_name.c_str(), device_name.size(),
-                         &wide_device_name);
-        const int64_t device_id =
-            display::win::internal::DisplayInfo::DeviceIdFromDeviceName(
-                wide_device_name.c_str());
-        source.display_id = base::NumberToString(device_id);
+        if (auto id_iter = device_name_to_id.find(device_name);
+            id_iter != device_name_to_id.end()) {
+          source.display_id = base::NumberToString(id_iter->second);
+        }
       }
     }
 #elif BUILDFLAG(IS_MAC)
@@ -430,21 +467,25 @@ void DesktopCapturer::UpdateSourcesList(DesktopMediaList* list) {
               std::back_inserter(captured_sources_));
   }
 
-  if (!capture_window_ && !capture_screen_) {
-    v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
-    v8::HandleScope scope(isolate);
-    gin_helper::CallMethod(this, "_onfinished", captured_sources_);
+  if (!capture_window_ && !capture_screen_)
+    HandleSuccess();
+}
 
-    screen_capturer_.reset();
-    window_capturer_.reset();
+void DesktopCapturer::HandleSuccess() {
+  v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+  v8::HandleScope scope(isolate);
+  gin_helper::CallMethod(this, "_onfinished", captured_sources_);
 
-    Unpin();
-  }
+  screen_capturer_.reset();
+  window_capturer_.reset();
+
+  Unpin();
 }
 
 void DesktopCapturer::HandleFailure() {
   v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
   v8::HandleScope scope(isolate);
+
   gin_helper::CallMethod(this, "_onerror", "Failed to get sources.");
 
   screen_capturer_.reset();

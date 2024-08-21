@@ -29,7 +29,7 @@
 
 version: 1.0.{build}
 build_cloud: electronhq-16-core
-image: e-123.0.6296.0
+image: e-129.0.6656.0
 environment:
   GIT_CACHE_PATH: C:\Users\appveyor\libcc_cache
   ELECTRON_OUT_DIR: Default
@@ -39,7 +39,7 @@ environment:
   MOCHA_MULTI_REPORTERS: "@marshallofsound/mocha-appveyor-reporter, tap"
   DEPOT_TOOLS_WIN_TOOLCHAIN: 1
   DEPOT_TOOLS_WIN_TOOLCHAIN_BASE_URL: "https://dev-cdn.electronjs.org/windows-toolchains/_"
-  GYP_MSVS_HASH_27370823e7: 28622d16b1
+  GYP_MSVS_HASH_7393122652: 3ba76c5c20
   PYTHONIOENCODING: UTF-8
 
   matrix:
@@ -138,7 +138,8 @@ for:
       - gn gen out/Default "--args=import(\"%BUILD_CONFIG_PATH%\") use_remoteexec=true %GN_EXTRA_ARGS% "
       - gn check out/Default //electron:electron_lib
       - gn check out/Default //electron:electron_app
-      - gn check out/Default //electron/shell/common/api:mojo
+      - gn check out/Default //electron/shell/common:mojo
+      - gn check out/Default //electron/shell/common:plugin
       - if DEFINED ELECTRON_RBE_JWT (autoninja -j 300 -C out/Default electron:electron_app) else (autoninja -C out/Default electron:electron_app)
       - if "%GN_CONFIG%"=="testing" ( python C:\depot_tools\post_build_ninja_summary.py -C out\Default )
       - gn gen out/ffmpeg "--args=import(\"//electron/build/args/ffmpeg.gn\") use_remoteexec=true %GN_EXTRA_ARGS%"
@@ -147,7 +148,7 @@ for:
       - gn desc out/Default v8:run_mksnapshot_default args > out/Default/default_mksnapshot_args
       # Remove unused args from mksnapshot_args
       - ps: >-
-          Get-Content out/Default/default_mksnapshot_args | Where-Object { -not $_.Contains('--turbo-profiling-input') -And -not $_.Contains('builtins-pgo') -And -not $_.Contains('The gn arg use_goma=true') } | Set-Content out/Default/mksnapshot_args
+          Get-Content out/Default/default_mksnapshot_args | Where-Object { -not $_.Contains('--turbo-profiling-input') -And -not $_.Contains('builtins-pgo') } | Set-Content out/Default/mksnapshot_args
       - autoninja -C out/Default electron:electron_mksnapshot_zip
       - cd out\Default
       - 7z a mksnapshot.zip mksnapshot_args gen\v8\embedded.S
@@ -273,8 +274,8 @@ for:
                 Invoke-RestMethod -Method Get -Uri "$apiUrl/buildjobs/$jobId/artifacts/$artifact_name" -OutFile $outfile
               }
               # Uncomment the following lines to download the pdb.zip to show real stacktraces when crashes happen during testing
-              # Invoke-RestMethod -Method Get -Uri "$apiUrl/buildjobs/$jobId/artifacts/pdb.zip" -OutFile pdb.zip
-              # 7z x -y -osrc pdb.zip
+              Invoke-RestMethod -Method Get -Uri "$apiUrl/buildjobs/$jobId/artifacts/pdb.zip" -OutFile pdb.zip
+              7z x -y -osrc pdb.zip
             }
           }
       - ps: |

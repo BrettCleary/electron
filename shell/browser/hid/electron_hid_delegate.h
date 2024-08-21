@@ -14,7 +14,6 @@
 #include "content/public/browser/hid_chooser.h"
 #include "content/public/browser/hid_delegate.h"
 #include "services/device/public/mojom/hid.mojom-forward.h"
-#include "shell/browser/hid/hid_chooser_context.h"
 #include "third_party/blink/public/mojom/hid/hid.mojom-forward.h"
 #include "url/origin.h"
 
@@ -43,10 +42,12 @@ class ElectronHidDelegate : public content::HidDelegate {
   bool CanRequestDevicePermission(content::BrowserContext* browser_context,
                                   const url::Origin& origin) override;
   bool HasDevicePermission(content::BrowserContext* browser_context,
+                           content::RenderFrameHost* render_frame_host,
                            const url::Origin& origin,
                            const device::mojom::HidDeviceInfo& device) override;
   void RevokeDevicePermission(
       content::BrowserContext* browser_context,
+      content::RenderFrameHost* render_frame_host,
       const url::Origin& origin,
       const device::mojom::HidDeviceInfo& device) override;
   device::mojom::HidManager* GetHidManager(

@@ -8,7 +8,7 @@
 #include <memory>
 #include <string>
 
-#include "base/functional/callback.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/viz/host/client_frame_sink_video_capturer.h"
@@ -44,10 +44,10 @@ class OffScreenVideoConsumer : public viz::mojom::FrameSinkVideoConsumer {
       const gfx::Rect& content_rect,
       mojo::PendingRemote<viz::mojom::FrameSinkVideoConsumerFrameCallbacks>
           callbacks) override;
-  void OnNewSubCaptureTargetVersion(uint32_t crop_version) override;
-  void OnFrameWithEmptyRegionCapture() override;
-  void OnStopped() override;
-  void OnLog(const std::string& message) override;
+  void OnNewSubCaptureTargetVersion(uint32_t crop_version) override {}
+  void OnFrameWithEmptyRegionCapture() override {}
+  void OnStopped() override {}
+  void OnLog(const std::string& message) override {}
 
   bool CheckContentRect(const gfx::Rect& content_rect);
 

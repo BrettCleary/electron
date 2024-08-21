@@ -4,7 +4,6 @@
 
 #include <string>
 
-#include "base/values.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "gin/dictionary.h"
@@ -42,7 +41,7 @@ RenderFrame* GetCurrentRenderFrame() {
 }
 
 class IPCRenderer : public gin::Wrappable<IPCRenderer>,
-                    public content::RenderFrameObserver {
+                    private content::RenderFrameObserver {
  public:
   static gin::WrapperInfo kWrapperInfo;
 

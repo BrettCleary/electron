@@ -16,6 +16,7 @@
 #include "base/values.h"
 #include "gin/converter.h"
 #include "gin/dictionary.h"
+#include "gin/handle.h"
 #include "gin/object_template_builder.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util.h"
@@ -244,13 +245,13 @@ bool Converter<net::HttpRequestHeaders>::FromV8(v8::Isolate* isolate,
   if (!ConvertFromV8(isolate, val, &dict))
     return false;
   for (const auto it : dict) {
-    if (it.second.is_string()) {
-      std::string value = it.second.GetString();
-      out->SetHeader(it.first, value);
-    }
+    if (it.second.is_string())
+      out->SetHeader(it.first, std::move(it.second).TakeString());
   }
   return true;
 }
+
+namespace {
 
 class ChunkedDataPipeReadableStream
     : public gin::Wrappable<ChunkedDataPipeReadableStream> {
@@ -270,6 +271,8 @@ class ChunkedDataPipeReadableStream
                ChunkedDataPipeReadableStream>::GetObjectTemplateBuilder(isolate)
         .SetMethod("read", &ChunkedDataPipeReadableStream::Read);
   }
+
+  const char* GetTypeName() override { return "ChunkedDataPipeReadableStream"; }
 
   static gin::WrapperInfo kWrapperInfo;
 
@@ -359,13 +362,15 @@ class ChunkedDataPipeReadableStream
                               base::Unretained(this)));
     }
 
-    uint32_t num_bytes = buf->ByteLength();
+    size_t num_bytes = buf->ByteLength();
     if (size_ && num_bytes > *size_ - bytes_read_)
       num_bytes = *size_ - bytes_read_;
     MojoResult rv = data_pipe_->ReadData(
-        static_cast<void*>(static_cast<char*>(buf->Buffer()->Data()) +
-                           buf->ByteOffset()),
-        &num_bytes, MOJO_READ_DATA_FLAG_NONE);
+        MOJO_READ_DATA_FLAG_NONE,
+        base::span(static_cast<uint8_t*>(buf->Buffer()->Data()),
+                   buf->ByteLength())
+            .subspan(buf->ByteOffset(), num_bytes),
+        num_bytes);
     if (rv == MOJO_RESULT_OK) {
       bytes_read_ += num_bytes;
       // Not needed for correctness, but this allows the consumer to send the
@@ -489,8 +494,11 @@ class ChunkedDataPipeReadableStream
   v8::Global<v8::ArrayBufferView> buf_;
   gin_helper::Promise<int> promise_;
 };
+
 gin::WrapperInfo ChunkedDataPipeReadableStream::kWrapperInfo = {
     gin::kEmbedderNativeGin};
+
+}  // namespace
 
 // static
 v8::Local<v8::Value> Converter<network::ResourceRequestBody>::ToV8(

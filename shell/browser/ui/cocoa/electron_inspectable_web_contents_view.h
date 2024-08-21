@@ -39,6 +39,7 @@ using electron::InspectableWebContentsViewMac;
 - (instancetype)initWithInspectableWebContentsViewMac:
     (InspectableWebContentsViewMac*)view;
 - (void)notifyDevToolsFocused;
+- (void)setCornerRadii:(CGFloat)cornerRadius;
 - (void)setDevToolsVisible:(BOOL)visible activate:(BOOL)activate;
 - (BOOL)isDevToolsVisible;
 - (BOOL)isDevToolsFocused;

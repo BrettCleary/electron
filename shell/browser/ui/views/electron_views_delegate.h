@@ -8,7 +8,6 @@
 #include <memory>
 #include <string>
 
-#include "base/compiler_specific.h"
 #include "base/containers/flat_map.h"
 #include "ui/views/views_delegate.h"
 
@@ -49,8 +48,8 @@ class ViewsDelegate : public views::ViewsDelegate {
 #endif
   std::unique_ptr<views::NonClientFrameView> CreateDefaultNonClientFrameView(
       views::Widget* widget) override;
-  void AddRef() override;
-  void ReleaseRef() override;
+  void AddRef() override {}
+  void ReleaseRef() override {}
   void OnBeforeWidgetInit(
       views::Widget::InitParams* params,
       views::internal::NativeWidgetDelegate* delegate) override;

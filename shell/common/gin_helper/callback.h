@@ -9,11 +9,11 @@
 #include <vector>
 
 #include "base/functional/bind.h"
-#include "gin/dictionary.h"
 #include "shell/common/gin_converters/std_converter.h"
 #include "shell/common/gin_helper/function_template.h"
 #include "shell/common/gin_helper/locker.h"
 #include "shell/common/gin_helper/microtasks_scope.h"
+#include "v8/include/v8-function.h"
 // Implements safe conversions between JS functions and base::RepeatingCallback.
 
 namespace gin_helper {
@@ -50,8 +50,9 @@ struct V8FunctionInvoker<v8::Local<v8::Value>(ArgTypes...)> {
       return v8::Null(isolate);
     v8::Local<v8::Function> holder = function.NewHandle(isolate);
     v8::Local<v8::Context> context = holder->GetCreationContextChecked();
-    gin_helper::MicrotasksScope microtasks_scope(
-        isolate, context->GetMicrotaskQueue(), true);
+    gin_helper::MicrotasksScope microtasks_scope{
+        isolate, context->GetMicrotaskQueue(), true,
+        v8::MicrotasksScope::kRunMicrotasks};
     v8::Context::Scope context_scope(context);
     std::vector<v8::Local<v8::Value>> args{
         gin::ConvertToV8(isolate, std::forward<ArgTypes>(raw))...};
@@ -75,8 +76,9 @@ struct V8FunctionInvoker<void(ArgTypes...)> {
       return;
     v8::Local<v8::Function> holder = function.NewHandle(isolate);
     v8::Local<v8::Context> context = holder->GetCreationContextChecked();
-    gin_helper::MicrotasksScope microtasks_scope(
-        isolate, context->GetMicrotaskQueue(), true);
+    gin_helper::MicrotasksScope microtasks_scope{
+        isolate, context->GetMicrotaskQueue(), true,
+        v8::MicrotasksScope::kRunMicrotasks};
     v8::Context::Scope context_scope(context);
     std::vector<v8::Local<v8::Value>> args{
         gin::ConvertToV8(isolate, std::forward<ArgTypes>(raw))...};
@@ -99,8 +101,9 @@ struct V8FunctionInvoker<ReturnType(ArgTypes...)> {
       return ret;
     v8::Local<v8::Function> holder = function.NewHandle(isolate);
     v8::Local<v8::Context> context = holder->GetCreationContextChecked();
-    gin_helper::MicrotasksScope microtasks_scope(
-        isolate, context->GetMicrotaskQueue(), true);
+    gin_helper::MicrotasksScope microtasks_scope{
+        isolate, context->GetMicrotaskQueue(), true,
+        v8::MicrotasksScope::kRunMicrotasks};
     v8::Context::Scope context_scope(context);
     std::vector<v8::Local<v8::Value>> args{
         gin::ConvertToV8(isolate, std::forward<ArgTypes>(raw))...};
@@ -132,8 +135,9 @@ template <typename ReturnType, typename... ArgTypes>
 struct NativeFunctionInvoker<ReturnType(ArgTypes...)> {
   static void Go(base::RepeatingCallback<ReturnType(ArgTypes...)> val,
                  gin::Arguments* args) {
-    using Indices = typename IndicesGenerator<sizeof...(ArgTypes)>::type;
-    Invoker<Indices, ArgTypes...> invoker(args, 0);
+    using Indices = std::index_sequence_for<ArgTypes...>;
+    Invoker<Indices, ArgTypes...> invoker(args,
+                                          {.holder_is_first_argument = false});
     if (invoker.IsOK())
       invoker.DispatchToCallback(val);
   }

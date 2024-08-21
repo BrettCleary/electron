@@ -15,24 +15,30 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/predictors/preconnect_manager.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/media_stream_request.h"
 #include "content/public/browser/resource_context.h"
 #include "electron/buildflags/buildflags.h"
-#include "gin/arguments.h"
+#include "electron/shell/browser/media/media_device_id_salt.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
-#include "shell/browser/media/media_device_id_salt.h"
 #include "third_party/blink/public/common/permissions/permission_utils.h"
 
 class PrefService;
 class ValueMapPrefStore;
 
+namespace gin {
+class Arguments;
+}
+
 namespace network {
 class SharedURLLoaderFactory;
 }
+
+namespace predictors {
+class PreconnectManager;
+}  // namespace predictors
 
 namespace storage {
 class SpecialStoragePolicy;
@@ -44,18 +50,7 @@ class ElectronExtensionSystem;
 }
 #endif
 
-namespace v8 {
-template <typename T>
-class Local;
-class Isolate;
-class Value;
-}  // namespace v8
-
 namespace electron {
-
-using DevicePermissionMap =
-    std::map<blink::PermissionType,
-             std::map<url::Origin, std::vector<std::unique_ptr<base::Value>>>>;
 
 class ElectronDownloadManagerDelegate;
 class ElectronPermissionManager;
@@ -69,10 +64,6 @@ using DisplayMediaResponseCallbackJs =
 using DisplayMediaRequestHandler =
     base::RepeatingCallback<void(const content::MediaStreamRequest&,
                                  DisplayMediaResponseCallbackJs)>;
-using PartitionOrPath =
-    std::variant<std::reference_wrapper<const std::string>,
-                 std::reference_wrapper<const base::FilePath>>;
-
 class ElectronBrowserContext : public content::BrowserContext {
  public:
   // disable copy
@@ -150,6 +141,8 @@ class ElectronBrowserContext : public content::BrowserContext {
   content::StorageNotificationService* GetStorageNotificationService() override;
   content::ReduceAcceptLanguageControllerDelegate*
   GetReduceAcceptLanguageControllerDelegate() override;
+  content::FileSystemAccessPermissionContext*
+  GetFileSystemAccessPermissionContext() override;
 
   CookieChangeNotifier* cookie_change_notifier() const {
     return cookie_change_notifier_.get();
@@ -205,6 +198,14 @@ class ElectronBrowserContext : public content::BrowserContext {
                              blink::PermissionType permissionType);
 
  private:
+  using DevicePermissionMap = std::map<
+      blink::PermissionType,
+      std::map<url::Origin, std::vector<std::unique_ptr<base::Value>>>>;
+
+  using PartitionOrPath =
+      std::variant<std::reference_wrapper<const std::string>,
+                   std::reference_wrapper<const base::FilePath>>;
+
   ElectronBrowserContext(const PartitionOrPath partition_location,
                          bool in_memory,
                          base::Value::Dict options);
@@ -218,10 +219,6 @@ class ElectronBrowserContext : public content::BrowserContext {
 
   // Initialize pref registry.
   void InitPrefs();
-
-  bool DoesDeviceMatch(const base::Value& device,
-                       const base::Value* device_to_compare,
-                       blink::PermissionType permission_type);
 
   scoped_refptr<ValueMapPrefStore> in_memory_pref_store_;
   std::unique_ptr<CookieChangeNotifier> cookie_change_notifier_;

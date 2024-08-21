@@ -17,20 +17,10 @@ Upstreams:
 - https://github.com/nodejs/node/pull/39136
 
 diff --git a/src/crypto/crypto_cipher.cc b/src/crypto/crypto_cipher.cc
-index 99a16a667baa20138715b0901e3255e41f5f1052..a7f210031085a348f752e7e7e963d2f040bc2000 100644
+index 67cd4f2adf15e7d8511f561c54163b1842e971af..88471fd6bc0b8a810bb55464cd2d1933d11a8623 100644
 --- a/src/crypto/crypto_cipher.cc
 +++ b/src/crypto/crypto_cipher.cc
-@@ -28,7 +28,8 @@ using v8::Value;
- namespace crypto {
- namespace {
- bool IsSupportedAuthenticatedMode(const EVP_CIPHER* cipher) {
--  switch (EVP_CIPHER_mode(cipher)) {
-+  const int mode = EVP_CIPHER_mode(cipher);
-+  switch (mode) {
-   case EVP_CIPH_CCM_MODE:
-   case EVP_CIPH_GCM_MODE:
- #ifndef OPENSSL_NO_OCB
-@@ -1062,7 +1063,7 @@ void PublicKeyCipher::Cipher(const FunctionCallbackInfo<Value>& args) {
+@@ -1088,7 +1088,7 @@ void PublicKeyCipher::Cipher(const FunctionCallbackInfo<Value>& args) {
      if (EVP_PKEY_decrypt_init(ctx.get()) <= 0) {
        return ThrowCryptoError(env, ERR_get_error());
      }
@@ -39,7 +29,7 @@ index 99a16a667baa20138715b0901e3255e41f5f1052..a7f210031085a348f752e7e7e963d2f0
      int rsa_pkcs1_implicit_rejection =
          EVP_PKEY_CTX_ctrl_str(ctx.get(), "rsa_pkcs1_implicit_rejection", "1");
      // From the doc -2 means that the option is not supported.
-@@ -1078,6 +1079,7 @@ void PublicKeyCipher::Cipher(const FunctionCallbackInfo<Value>& args) {
+@@ -1104,6 +1104,7 @@ void PublicKeyCipher::Cipher(const FunctionCallbackInfo<Value>& args) {
            "RSA_PKCS1_PADDING is no longer supported for private decryption,"
            " this can be reverted with --security-revert=CVE-2023-46809");
      }
@@ -48,10 +38,10 @@ index 99a16a667baa20138715b0901e3255e41f5f1052..a7f210031085a348f752e7e7e963d2f0
  
    const EVP_MD* digest = nullptr;
 diff --git a/src/crypto/crypto_common.cc b/src/crypto/crypto_common.cc
-index c6120a655ec853aef11c66ed37d7ca0ffb957dd3..a52ca15cb0ab592d4196d4bd0f1133240967d70c 100644
+index 962018583360a137639682d4aec8b0ebad2f3070..4f569daa0d5e9976f40f30b77425679798a0b8b8 100644
 --- a/src/crypto/crypto_common.cc
 +++ b/src/crypto/crypto_common.cc
-@@ -158,7 +158,7 @@ const char* GetClientHelloALPN(const SSLPointer& ssl) {
+@@ -166,7 +166,7 @@ const char* GetClientHelloALPN(const SSLPointer& ssl) {
    const unsigned char* buf;
    size_t len;
    size_t rem;
@@ -60,7 +50,7 @@ index c6120a655ec853aef11c66ed37d7ca0ffb957dd3..a52ca15cb0ab592d4196d4bd0f113324
    if (!SSL_client_hello_get0_ext(
            ssl.get(),
            TLSEXT_TYPE_application_layer_protocol_negotiation,
-@@ -171,13 +171,15 @@ const char* GetClientHelloALPN(const SSLPointer& ssl) {
+@@ -179,13 +179,15 @@ const char* GetClientHelloALPN(const SSLPointer& ssl) {
    len = (buf[0] << 8) | buf[1];
    if (len + 2 != rem) return nullptr;
    return reinterpret_cast<const char*>(buf + 3);
@@ -77,7 +67,7 @@ index c6120a655ec853aef11c66ed37d7ca0ffb957dd3..a52ca15cb0ab592d4196d4bd0f113324
    if (!SSL_client_hello_get0_ext(
            ssl.get(),
            TLSEXT_TYPE_server_name,
-@@ -199,15 +201,20 @@ const char* GetClientHelloServerName(const SSLPointer& ssl) {
+@@ -207,6 +209,8 @@ const char* GetClientHelloServerName(const SSLPointer& ssl) {
    if (len + 2 > rem)
      return nullptr;
    return reinterpret_cast<const char*>(buf + 5);
@@ -86,22 +76,7 @@ index c6120a655ec853aef11c66ed37d7ca0ffb957dd3..a52ca15cb0ab592d4196d4bd0f113324
  }
  
  const char* GetServerName(SSL* ssl) {
-   return SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
- }
- 
--bool SetGroups(SecureContext* sc, const char* groups) {
--  return SSL_CTX_set1_groups_list(sc->ctx().get(), groups) == 1;
--}
-+ bool SetGroups(SecureContext* sc, const char* groups) {
-+#ifndef OPENSSL_IS_BORINGSSL
-+   return SSL_CTX_set1_groups_list(sc->ctx().get(), groups) == 1;
-+#endif
-+  return SSL_CTX_set1_curves_list(sc->ctx().get(), groups) == 1;
-+ }
- 
- const char* X509ErrorCode(long err) {  // NOLINT(runtime/int)
-   const char* code = "UNSPECIFIED";
-@@ -1044,14 +1051,14 @@ MaybeLocal<Array> GetClientHelloCiphers(
+@@ -1044,14 +1048,14 @@ MaybeLocal<Array> GetClientHelloCiphers(
      Environment* env,
      const SSLPointer& ssl) {
    EscapableHandleScope scope(env->isolate());
@@ -120,8 +95,21 @@ index c6120a655ec853aef11c66ed37d7ca0ffb957dd3..a52ca15cb0ab592d4196d4bd0f113324
      Local<Object> obj = Object::New(env->isolate());
      if (!Set(env->context(),
               obj,
+@@ -1104,8 +1108,11 @@ MaybeLocal<Object> GetEphemeralKey(Environment* env, const SSLPointer& ssl) {
+ 
+   EscapableHandleScope scope(env->isolate());
+   Local<Object> info = Object::New(env->isolate());
++#ifndef OPENSSL_IS_BORINGSSL
+   if (!SSL_get_peer_tmp_key(ssl.get(), &raw_key)) return scope.Escape(info);
+-
++#else
++  if (!SSL_get_server_tmp_key(ssl.get(), &raw_key)) return scope.Escape(info);
++#endif
+   Local<Context> context = env->context();
+   crypto::EVPKeyPointer key(raw_key);
+ 
 diff --git a/src/crypto/crypto_context.cc b/src/crypto/crypto_context.cc
-index 6e5bbe07d0c337b36f3157c2e6404fdc91849fd1..7ec682833213de9054a8c30751436d12baaea235 100644
+index e26e64834bee7fd9cd4e18bfe69a4f41d51fa8e9..a5b1ec5ea6284ab9892d5a2e576f369ae3bbac91 100644
 --- a/src/crypto/crypto_context.cc
 +++ b/src/crypto/crypto_context.cc
 @@ -63,7 +63,7 @@ inline X509_STORE* GetOrCreateRootCertStore() {
@@ -147,10 +135,10 @@ index 6e5bbe07d0c337b36f3157c2e6404fdc91849fd1..7ec682833213de9054a8c30751436d12
    DHPointer dh;
    {
 diff --git a/src/crypto/crypto_dh.cc b/src/crypto/crypto_dh.cc
-index 408d6be2a9cfdbcb52af285204c07c40bf74a5a9..9c3244a14bc286d60805bac5719df6595d802768 100644
+index b4447102a8478639a5aa774e583834d79808603f..fa507b6d3c04691f44b3302058d2007a966306db 100644
 --- a/src/crypto/crypto_dh.cc
 +++ b/src/crypto/crypto_dh.cc
-@@ -153,13 +153,11 @@ bool DiffieHellman::Init(BignumPointer&& bn_p, int g) {
+@@ -154,13 +154,11 @@ bool DiffieHellman::Init(BignumPointer&& bn_p, int g) {
  bool DiffieHellman::Init(const char* p, int p_len, int g) {
    dh_.reset(DH_new());
    if (p_len <= 0) {
@@ -165,8 +153,8 @@ index 408d6be2a9cfdbcb52af285204c07c40bf74a5a9..9c3244a14bc286d60805bac5719df659
 +    OPENSSL_PUT_ERROR(DH, DH_R_BAD_GENERATOR);
      return false;
    }
-   BIGNUM* bn_p =
-@@ -177,21 +175,18 @@ bool DiffieHellman::Init(const char* p, int p_len, int g) {
+   BignumPointer bn_p(
+@@ -176,20 +174,17 @@ bool DiffieHellman::Init(const char* p, int p_len, int g) {
  bool DiffieHellman::Init(const char* p, int p_len, const char* g, int g_len) {
    dh_.reset(DH_new());
    if (p_len <= 0) {
@@ -181,17 +169,16 @@ index 408d6be2a9cfdbcb52af285204c07c40bf74a5a9..9c3244a14bc286d60805bac5719df659
 +    OPENSSL_PUT_ERROR(DH, DH_R_BAD_GENERATOR);
      return false;
    }
-   BIGNUM* bn_g =
-       BN_bin2bn(reinterpret_cast<const unsigned char*>(g), g_len, nullptr);
-   if (BN_is_zero(bn_g) || BN_is_one(bn_g)) {
-     BN_free(bn_g);
+   BignumPointer bn_g(
+       BN_bin2bn(reinterpret_cast<const unsigned char*>(g), g_len, nullptr));
+   if (BN_is_zero(bn_g.get()) || BN_is_one(bn_g.get())) {
 -    ERR_put_error(ERR_LIB_DH, DH_F_DH_BUILTIN_GENPARAMS,
 -      DH_R_BAD_GENERATOR, __FILE__, __LINE__);
 +    OPENSSL_PUT_ERROR(DH, DH_R_BAD_GENERATOR);
      return false;
    }
-   BIGNUM* bn_p =
-@@ -218,8 +213,10 @@ typedef BignumPointer (*StandardizedGroupInstantiator)();
+   BignumPointer bn_p(
+@@ -219,8 +214,10 @@ typedef BignumPointer (*StandardizedGroupInstantiator)();
  inline StandardizedGroupInstantiator FindDiffieHellmanGroup(const char* name) {
  #define V(n, p)                                                                \
    if (StringEqualNoCase(name, n)) return InstantiateStandardizedGroup<p>
@@ -202,28 +189,20 @@ index 408d6be2a9cfdbcb52af285204c07c40bf74a5a9..9c3244a14bc286d60805bac5719df659
    V("modp5", BN_get_rfc3526_prime_1536);
    V("modp14", BN_get_rfc3526_prime_2048);
    V("modp15", BN_get_rfc3526_prime_3072);
-@@ -558,15 +555,20 @@ EVPKeyCtxPointer DhKeyGenTraits::Setup(DhKeyPairGenConfig* params) {
-       return EVPKeyCtxPointer();
-     }
- 
-+#ifndef OPENSSL_IS_BORINGSSL
-     prime_fixed_value->release();
-     bn_g.release();
- 
+@@ -565,9 +562,11 @@ EVPKeyCtxPointer DhKeyGenTraits::Setup(DhKeyPairGenConfig* params) {
      key_params = EVPKeyPointer(EVP_PKEY_new());
      CHECK(key_params);
      CHECK_EQ(EVP_PKEY_assign_DH(key_params.get(), dh.release()), 1);
-+#else
-+    return EVPKeyCtxPointer();
-+#endif
-   } else if (int* prime_size = std::get_if<int>(&params->params.prime)) {
+-  } else if (int* prime_size = std::get_if<int>(&params->params.prime)) {
++  } else if (std::get_if<int>(&params->params.prime)) {
      EVPKeyCtxPointer param_ctx(EVP_PKEY_CTX_new_id(EVP_PKEY_DH, nullptr));
      EVP_PKEY* raw_params = nullptr;
 +#ifndef OPENSSL_IS_BORINGSSL
++    int* prime_size = std::get_if<int>(&params->params.prime);
      if (!param_ctx ||
          EVP_PKEY_paramgen_init(param_ctx.get()) <= 0 ||
          EVP_PKEY_CTX_set_dh_paramgen_prime_len(
-@@ -580,6 +582,9 @@ EVPKeyCtxPointer DhKeyGenTraits::Setup(DhKeyPairGenConfig* params) {
+@@ -581,6 +580,9 @@ EVPKeyCtxPointer DhKeyGenTraits::Setup(DhKeyPairGenConfig* params) {
      }
  
      key_params = EVPKeyPointer(raw_params);
@@ -258,7 +237,7 @@ index 3fa4a415dc911a13afd90dfb31c1ed4ad0fd268f..fa48dffc31342c44a1c1207b9d4c3dc7
      return EVPKeyCtxPointer();
  
 diff --git a/src/crypto/crypto_keys.cc b/src/crypto/crypto_keys.cc
-index c5dd2fb8fce40f2bf6f9a8543047ffb50cc08084..d850af9257cc194ee385130ce3cd2c0101b2455f 100644
+index a4979cf5586a7be6308a917eb020bedafa17f683..e4705482c6d45138deac84c59d8192bb2a284a76 100644
 --- a/src/crypto/crypto_keys.cc
 +++ b/src/crypto/crypto_keys.cc
 @@ -1241,6 +1241,7 @@ void KeyObjectHandle::GetAsymmetricKeyType(
@@ -373,19 +352,28 @@ index 5734d8fdc5505e1586f571c19b840bd56e9c9f1f..3034b114e081e2b32dd5b71653927a41
  }
  }  // namespace
  
-diff --git a/src/node_metadata.cc b/src/node_metadata.cc
-index b88cfb98e75aca426224e19376b3ff4c23b92e53..b66f4e2b5cbd8f36af42f82a8921207302360e39 100644
---- a/src/node_metadata.cc
-+++ b/src/node_metadata.cc
-@@ -16,7 +16,7 @@
+diff --git a/src/env.h b/src/env.h
+index cd8db07919dc4d00675bbaae976e8fa1fcc16028..2310c89227f08cdcca6c4965cc163031af303626 100644
+--- a/src/env.h
++++ b/src/env.h
+@@ -49,7 +49,7 @@
+ #include "uv.h"
  #include "v8.h"
- #include "zlib_version.h"
  
 -#if HAVE_OPENSSL
-+#if HAVE_OPENSSL && !defined(OPENSSL_IS_BORINGSSL)
- #include <openssl/opensslv.h>
- #if NODE_OPENSSL_HAS_QUIC
- #include <openssl/quic.h>
++#if HAVE_OPENSSL && OPENSSL_VERSION_MAJOR >= 3
+ #include <openssl/evp.h>
+ #endif
+ 
+@@ -1038,7 +1038,7 @@ class Environment : public MemoryRetainer {
+     kExitInfoFieldCount
+   };
+ 
+-#if HAVE_OPENSSL
++#if HAVE_OPENSSL// && !defined(OPENSSL_IS_BORINGSSL)
+ #if OPENSSL_VERSION_MAJOR >= 3
+   // We declare another alias here to avoid having to include crypto_util.h
+   using EVPMDPointer = DeleteFnPtr<EVP_MD, EVP_MD_free>;
 diff --git a/src/node_metadata.h b/src/node_metadata.h
 index cf051585e779e2b03bd7b95fe5008b89cc7f8162..9de49c6828468fdf846dcd4ad445390f14446099 100644
 --- a/src/node_metadata.h
@@ -400,7 +388,7 @@ index cf051585e779e2b03bd7b95fe5008b89cc7f8162..9de49c6828468fdf846dcd4ad445390f
  #if NODE_OPENSSL_HAS_QUIC
  #include <openssl/quic.h>
 diff --git a/src/node_options.cc b/src/node_options.cc
-index 5da6918af8c125259a89ce95bbbbc4fc475c4c69..a3d25cdd52f18e319ae3ac81437c8a0206b18690 100644
+index 1ba0bfcd9b3096c4bffe518ad08973edb895e8c3..28fbd93c5d4a6f379844e10e556920b7614910d8 100644
 --- a/src/node_options.cc
 +++ b/src/node_options.cc
 @@ -6,7 +6,7 @@
@@ -413,7 +401,7 @@ index 5da6918af8c125259a89ce95bbbbc4fc475c4c69..a3d25cdd52f18e319ae3ac81437c8a02
  #endif
  
 diff --git a/src/node_options.h b/src/node_options.h
-index 312fae8f759c5828d0770ceee845dc4754871436..207468a2177d36894c64cb37aac946af02c82549 100644
+index 1357e5b42869e8e3a30d2bf6db0faed565d99754..49c6d8b4162977a926e36bad7183a10502b2beaf 100644
 --- a/src/node_options.h
 +++ b/src/node_options.h
 @@ -11,7 +11,7 @@

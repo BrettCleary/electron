@@ -8,12 +8,16 @@
 #include <string>
 
 #include <vector>
-#include "gin/handle.h"
 #include "gin/wrappable.h"
 #include "shell/browser/browser_observer.h"
 #include "shell/browser/electron_browser_client.h"
 #include "shell/browser/event_emitter_mixin.h"
 #include "shell/common/gin_helper/promise.h"
+
+namespace gin {
+template <typename T>
+class Handle;
+}  // namespace gin
 
 namespace electron::api {
 
@@ -21,7 +25,7 @@ class PushNotifications
     : public ElectronBrowserClient::Delegate,
       public gin::Wrappable<PushNotifications>,
       public gin_helper::EventEmitterMixin<PushNotifications>,
-      public BrowserObserver {
+      private BrowserObserver {
  public:
   static PushNotifications* Get();
   static gin::Handle<PushNotifications> Create(v8::Isolate* isolate);

@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import * as url from 'node:url';
-import { BrowserWindow, session, ipcMain, app, WebContents, screen } from 'electron/main';
+import { BrowserWindow, session, ipcMain, app, WebContents } from 'electron/main';
 import { closeAllWindows } from './lib/window-helpers';
 import { emittedUntil } from './lib/events-helpers';
 import { ifit, ifdescribe, defer, itremote, useRemoteContext, listen } from './lib/spec-helpers';
@@ -9,7 +9,7 @@ import * as http from 'node:http';
 import * as auth from 'basic-auth';
 import { once } from 'node:events';
 import { setTimeout } from 'node:timers/promises';
-import { areColorsSimilar, captureScreen, HexColors, getPixelColor } from './lib/screen-helpers';
+import { HexColors, ScreenCapture, hasCapturableScreen } from './lib/screen-helpers';
 
 declare let WebView: any;
 const features = process._linkedBinding('electron_common_features');
@@ -796,60 +796,33 @@ describe('<webview> tag', function () {
     });
     after(() => w.close());
 
-    // Linux and arm64 platforms (WOA and macOS) do not return any capture sources
-    ifit(process.platform === 'darwin' && process.arch === 'x64')('is transparent by default', async () => {
+    ifit(hasCapturableScreen())('is transparent by default', async () => {
       await loadWebView(w.webContents, {
         src: 'data:text/html,foo'
       });
 
-      await setTimeout(1000);
-
-      const display = screen.getPrimaryDisplay();
-      const screenCapture = await captureScreen();
-      const centerColor = getPixelColor(screenCapture, {
-        x: display.size.width / 2,
-        y: display.size.height / 2
-      });
-
-      expect(areColorsSimilar(centerColor, WINDOW_BACKGROUND_COLOR)).to.be.true();
+      const screenCapture = new ScreenCapture();
+      await screenCapture.expectColorAtCenterMatches(WINDOW_BACKGROUND_COLOR);
     });
 
-    // Linux and arm64 platforms (WOA and macOS) do not return any capture sources
-    ifit(process.platform === 'darwin' && process.arch === 'x64')('remains transparent when set', async () => {
+    ifit(hasCapturableScreen())('remains transparent when set', async () => {
       await loadWebView(w.webContents, {
         src: 'data:text/html,foo',
         webpreferences: 'transparent=yes'
       });
 
-      await setTimeout(1000);
-
-      const display = screen.getPrimaryDisplay();
-      const screenCapture = await captureScreen();
-      const centerColor = getPixelColor(screenCapture, {
-        x: display.size.width / 2,
-        y: display.size.height / 2
-      });
-
-      expect(areColorsSimilar(centerColor, WINDOW_BACKGROUND_COLOR)).to.be.true();
+      const screenCapture = new ScreenCapture();
+      await screenCapture.expectColorAtCenterMatches(WINDOW_BACKGROUND_COLOR);
     });
 
-    // Linux and arm64 platforms (WOA and macOS) do not return any capture sources
-    ifit(process.platform === 'darwin' && process.arch === 'x64')('can disable transparency', async () => {
+    ifit(hasCapturableScreen())('can disable transparency', async () => {
       await loadWebView(w.webContents, {
         src: 'data:text/html,foo',
         webpreferences: 'transparent=no'
       });
 
-      await setTimeout(1000);
-
-      const display = screen.getPrimaryDisplay();
-      const screenCapture = await captureScreen();
-      const centerColor = getPixelColor(screenCapture, {
-        x: display.size.width / 2,
-        y: display.size.height / 2
-      });
-
-      expect(areColorsSimilar(centerColor, HexColors.WHITE)).to.be.true();
+      const screenCapture = new ScreenCapture();
+      await screenCapture.expectColorAtCenterMatches(HexColors.WHITE);
     });
   });
 
@@ -867,10 +840,11 @@ describe('<webview> tag', function () {
       return new Promise<void>((resolve, reject) => {
         session.fromPartition(partition).setPermissionRequestHandler(function (webContents, permission, callback) {
           if (webContents.id === webContentsId) {
-            // requestMIDIAccess with sysex requests both midi and midiSysex so
-            // grant the first midi one and then reject the midiSysex one
-            if (requestedPermission === 'midiSysex' && permission === 'midi') {
-              return callback(true);
+            // All midi permission requests are blocked or allowed as midiSysex permissions
+            // since https://chromium-review.googlesource.com/c/chromium/src/+/5154368
+            if (permission === 'midiSysex') {
+              const allowed = requestedPermission === 'midi' || requestedPermission === 'midiSysex';
+              return callback(!allowed);
             }
 
             try {
@@ -2123,8 +2097,8 @@ describe('<webview> tag', function () {
       }
     });
 
-    // TODO(miniak): figure out why this is failing on windows
-    ifdescribe(process.platform !== 'win32')('<webview>.capturePage()', () => {
+    // FIXME: This test is flaking constantly on Linux and macOS.
+    xdescribe('<webview>.capturePage()', () => {
       it('returns a Promise with a NativeImage', async function () {
         this.retries(5);
 

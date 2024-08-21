@@ -5,13 +5,10 @@
 #include "shell/renderer/electron_render_frame_observer.h"
 
 #include <utility>
-#include <vector>
 
-#include "base/command_line.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/trace_event/trace_event.h"
 #include "content/public/renderer/render_frame.h"
-#include "electron/buildflags/buildflags.h"
 #include "electron/shell/common/api/api.mojom.h"
 #include "ipc/ipc_message_macros.h"
 #include "net/base/net_module.h"
@@ -69,7 +66,7 @@ ElectronRenderFrameObserver::ElectronRenderFrameObserver(
   // In Chrome, app regions are only supported in the main frame.
   // However, we need to support draggable regions on other
   // local frames/windows, so extend support beyond the main frame.
-  render_frame_->GetWebView()->SetSupportsAppRegion(true);
+  render_frame_->GetWebView()->SetSupportsDraggableRegions(true);
 }
 
 void ElectronRenderFrameObserver::DidClearWindowObject() {
@@ -81,7 +78,7 @@ void ElectronRenderFrameObserver::DidClearWindowObject() {
       !web_frame->IsOnInitialEmptyDocument()) {
     v8::Isolate* isolate = web_frame->GetAgentGroupScheduler()->Isolate();
     v8::HandleScope handle_scope{isolate};
-    v8::Handle<v8::Context> context = web_frame->MainWorldScriptContext();
+    v8::Local<v8::Context> context = web_frame->MainWorldScriptContext();
     v8::MicrotasksScope microtasks_scope(
         isolate, context->GetMicrotaskQueue(),
         v8::MicrotasksScope::kDoNotRunMicrotasks);
@@ -94,7 +91,7 @@ void ElectronRenderFrameObserver::DidClearWindowObject() {
 }
 
 void ElectronRenderFrameObserver::DidInstallConditionalFeatures(
-    v8::Handle<v8::Context> context,
+    v8::Local<v8::Context> context,
     int world_id) {
   // When a child window is created with window.open, its WebPreferences will
   // be copied from its parent, and Chromium will initialize JS context in it
@@ -151,25 +148,6 @@ void ElectronRenderFrameObserver::DidInstallConditionalFeatures(
     if (!renderer_client_->IsWebViewFrame(context, render_frame_))
       renderer_client_->SetupMainWorldOverrides(context, render_frame_);
   }
-}
-
-void ElectronRenderFrameObserver::DraggableRegionsChanged() {
-  blink::WebVector<blink::WebDraggableRegion> webregions =
-      render_frame_->GetWebFrame()->GetDocument().DraggableRegions();
-  std::vector<mojom::DraggableRegionPtr> regions;
-  for (auto& webregion : webregions) {
-    auto region = mojom::DraggableRegion::New();
-    render_frame_->ConvertViewportToWindow(&webregion.bounds);
-    region->bounds = webregion.bounds;
-    region->draggable = webregion.draggable;
-    regions.push_back(std::move(region));
-  }
-
-  mojo::AssociatedRemote<mojom::ElectronWebContentsUtility>
-      web_contents_utility_remote;
-  render_frame_->GetRemoteAssociatedInterfaces()->GetInterface(
-      &web_contents_utility_remote);
-  web_contents_utility_remote->UpdateDraggableRegions(std::move(regions));
 }
 
 void ElectronRenderFrameObserver::WillReleaseScriptContext(

@@ -19,7 +19,6 @@
 #include "content/public/common/result_codes.h"
 #include "gin/handle.h"
 #include "gin/object_template_builder.h"
-#include "gin/wrappable.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "shell/browser/api/message_port.h"
 #include "shell/browser/javascript_environment.h"
@@ -64,7 +63,8 @@ UtilityProcessWrapper::UtilityProcessWrapper(
     std::map<IOHandle, IOType> stdio,
     base::EnvironmentMap env_map,
     base::FilePath current_working_directory,
-    bool use_plugin_helper) {
+    bool use_plugin_helper,
+    bool create_network_observer) {
 #if BUILDFLAG(IS_WIN)
   base::win::ScopedHandle stdout_write(nullptr);
   base::win::ScopedHandle stderr_write(nullptr);
@@ -145,6 +145,9 @@ UtilityProcessWrapper::UtilityProcessWrapper(
     }
   }
 
+  if (!content::ServiceProcessHost::HasObserver(this))
+    content::ServiceProcessHost::AddObserver(this);
+
   mojo::PendingReceiver<node::mojom::NodeService> receiver =
       node_service_remote_.BindNewPipeAndPassReceiver();
 
@@ -172,9 +175,10 @@ UtilityProcessWrapper::UtilityProcessWrapper(
                               : content::ChildProcessHost::CHILD_NORMAL)
 #endif
           .WithProcessCallback(
-              base::BindOnce(&UtilityProcessWrapper::OnServiceProcessLaunched,
+              base::BindOnce(&UtilityProcessWrapper::OnServiceProcessLaunch,
                              weak_factory_.GetWeakPtr()))
           .Pass());
+
   node_service_remote_.set_disconnect_with_reason_handler(
       base::BindOnce(&UtilityProcessWrapper::OnServiceProcessDisconnected,
                      weak_factory_.GetWeakPtr()));
@@ -200,6 +204,11 @@ UtilityProcessWrapper::UtilityProcessWrapper(
   loader_params->process_id = pid_;
   loader_params->is_orb_enabled = false;
   loader_params->is_trusted = true;
+  if (create_network_observer) {
+    url_loader_network_observer_.emplace();
+    loader_params->url_loader_network_observer =
+        url_loader_network_observer_->Bind();
+  }
   network::mojom::NetworkContext* network_context =
       g_browser_process->system_network_context_manager()->GetContext();
   network_context->CreateURLLoaderFactory(
@@ -210,35 +219,64 @@ UtilityProcessWrapper::UtilityProcessWrapper(
   network_context->CreateHostResolver(
       {}, host_resolver.InitWithNewPipeAndPassReceiver());
   params->host_resolver = std::move(host_resolver);
+  params->use_network_observer_from_url_loader_factory =
+      create_network_observer;
+
   node_service_remote_->Initialize(std::move(params));
 }
 
-UtilityProcessWrapper::~UtilityProcessWrapper() = default;
+UtilityProcessWrapper::~UtilityProcessWrapper() {
+  content::ServiceProcessHost::RemoveObserver(this);
+}
 
-void UtilityProcessWrapper::OnServiceProcessLaunched(
+void UtilityProcessWrapper::OnServiceProcessLaunch(
     const base::Process& process) {
   DCHECK(node_service_remote_.is_connected());
   pid_ = process.Pid();
   GetAllUtilityProcessWrappers().AddWithID(this, pid_);
-  if (stdout_read_fd_ != -1) {
+  if (stdout_read_fd_ != -1)
     EmitWithoutEvent("stdout", stdout_read_fd_);
-  }
-  if (stderr_read_fd_ != -1) {
+  if (stderr_read_fd_ != -1)
     EmitWithoutEvent("stderr", stderr_read_fd_);
+  if (url_loader_network_observer_.has_value()) {
+    url_loader_network_observer_->set_process_id(pid_);
   }
-  // Emit 'spawn' event
   EmitWithoutEvent("spawn");
 }
 
-void UtilityProcessWrapper::OnServiceProcessDisconnected(
-    uint32_t error_code,
-    const std::string& description) {
+void UtilityProcessWrapper::HandleTermination(uint64_t exit_code) {
   if (pid_ != base::kNullProcessId)
     GetAllUtilityProcessWrappers().Remove(pid_);
   CloseConnectorPort();
-  // Emit 'exit' event
-  EmitWithoutEvent("exit", error_code);
+
+  EmitWithoutEvent("exit", exit_code);
+
   Unpin();
+}
+
+void UtilityProcessWrapper::OnServiceProcessDisconnected(
+    uint32_t exit_code,
+    const std::string& description) {
+  if (description == "process_exit_termination")
+    HandleTermination(exit_code);
+}
+
+void UtilityProcessWrapper::OnServiceProcessTerminatedNormally(
+    const content::ServiceProcessInfo& info) {
+  if (!info.IsService<node::mojom::NodeService>() ||
+      info.GetProcess().Pid() != pid_)
+    return;
+
+  HandleTermination(info.exit_code());
+}
+
+void UtilityProcessWrapper::OnServiceProcessCrashed(
+    const content::ServiceProcessInfo& info) {
+  if (!info.IsService<node::mojom::NodeService>() ||
+      info.GetProcess().Pid() != pid_)
+    return;
+
+  HandleTermination(info.exit_code());
 }
 
 void UtilityProcessWrapper::CloseConnectorPort() {
@@ -250,7 +288,7 @@ void UtilityProcessWrapper::CloseConnectorPort() {
   }
 }
 
-void UtilityProcessWrapper::Shutdown(int exit_code) {
+void UtilityProcessWrapper::Shutdown(uint64_t exit_code) {
   if (pid_ != base::kNullProcessId)
     GetAllUtilityProcessWrappers().Remove(pid_);
   node_service_remote_.reset();
@@ -351,6 +389,7 @@ gin::Handle<UtilityProcessWrapper> UtilityProcessWrapper::Create(
 
   std::u16string display_name;
   bool use_plugin_helper = false;
+  bool create_network_observer = false;
   std::map<IOHandle, IOType> stdio;
   base::FilePath current_working_directory;
   base::EnvironmentMap env_map;
@@ -376,6 +415,7 @@ gin::Handle<UtilityProcessWrapper> UtilityProcessWrapper::Create(
 
     opts.Get("serviceName", &display_name);
     opts.Get("cwd", &current_working_directory);
+    opts.Get("respondToAuthRequestsFromMainProcess", &create_network_observer);
 
     std::vector<std::string> stdio_arr{"ignore", "inherit", "inherit"};
     opts.Get("stdio", &stdio_arr);
@@ -396,10 +436,10 @@ gin::Handle<UtilityProcessWrapper> UtilityProcessWrapper::Create(
 #endif
   }
   auto handle = gin::CreateHandle(
-      args->isolate(),
-      new UtilityProcessWrapper(std::move(params), display_name,
-                                std::move(stdio), env_map,
-                                current_working_directory, use_plugin_helper));
+      args->isolate(), new UtilityProcessWrapper(
+                           std::move(params), display_name, std::move(stdio),
+                           env_map, current_working_directory,
+                           use_plugin_helper, create_network_observer));
   handle->Pin(args->isolate());
   return handle;
 }

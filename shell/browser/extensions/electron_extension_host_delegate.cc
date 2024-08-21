@@ -28,15 +28,11 @@ void ElectronExtensionHostDelegate::OnExtensionHostCreated(
   electron::api::WebContents::FromOrCreate(isolate, web_contents);
 }
 
-void ElectronExtensionHostDelegate::OnMainFrameCreatedForBackgroundPage(
-    ExtensionHost* host) {}
-
 content::JavaScriptDialogManager*
 ElectronExtensionHostDelegate::GetJavaScriptDialogManager() {
   // TODO(jamescook): Create a JavaScriptDialogManager or reuse the one from
   // content_shell.
   NOTREACHED();
-  return nullptr;
 }
 
 void ElectronExtensionHostDelegate::CreateTab(
@@ -72,7 +68,6 @@ content::PictureInPictureResult
 ElectronExtensionHostDelegate::EnterPictureInPicture(
     content::WebContents* web_contents) {
   NOTREACHED();
-  return content::PictureInPictureResult();
 }
 
 void ElectronExtensionHostDelegate::ExitPictureInPicture() {

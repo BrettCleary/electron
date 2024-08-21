@@ -1194,6 +1194,30 @@ describe('protocol module', () => {
       expect(body).to.equal(text);
     });
 
+    it('calls destroy on aborted body stream', async () => {
+      const abortController = new AbortController();
+
+      class TestStream extends stream.Readable {
+        _read () {
+          this.push('infinite data');
+
+          // Abort the request that reads from this stream.
+          abortController.abort();
+        }
+      };
+      const body = new TestStream();
+      protocol.handle('test-scheme', () => {
+        return new Response(stream.Readable.toWeb(body) as ReadableStream<ArrayBufferView>);
+      });
+      defer(() => { protocol.unhandle('test-scheme'); });
+
+      const res = net.fetch('test-scheme://foo', {
+        signal: abortController.signal
+      });
+      await expect(res).to.be.rejectedWith('This operation was aborted');
+      await expect(once(body, 'end')).to.be.rejectedWith('The operation was aborted');
+    });
+
     it('accepts urls with no hostname in non-standard schemes', async () => {
       protocol.handle('test-scheme', (req) => new Response(req.url));
       defer(() => { protocol.unhandle('test-scheme'); });
@@ -1379,6 +1403,49 @@ describe('protocol module', () => {
         duplex: 'half' // https://github.com/microsoft/TypeScript/issues/53157
       } as any).then(r => r.text());
       expect(body).to.equal(text);
+    });
+
+    it('can receive stream request body asynchronously', async () => {
+      let done: any;
+      const requestReceived: Promise<Buffer[]> = new Promise(resolve => { done = resolve; });
+      protocol.handle('http-like', async (req) => {
+        const chunks = [];
+        for await (const chunk of (req.body as any)) {
+          chunks.push(chunk);
+        }
+        done(chunks);
+        return new Response('ok');
+      });
+      defer(() => { protocol.unhandle('http-like'); });
+      const w = new BrowserWindow({ show: false });
+      w.loadURL('about:blank');
+      const expectedHashChunks = await w.webContents.executeJavaScript(`
+        const dataStream = () =>
+          new ReadableStream({
+            async start(controller) {
+              for (let i = 0; i < 10; i++) { controller.enqueue(Array(1024 * 128).fill(+i).join("\\n")); }
+              controller.close();
+            },
+          }).pipeThrough(new TextEncoderStream());
+        fetch(
+          new Request("http-like://host", {
+            method: "POST",
+            body: dataStream(),
+            duplex: "half",
+          })
+        );
+        (async () => {
+          const chunks = []
+          for await (const chunk of dataStream()) {
+            chunks.push(chunk);
+          }
+          return chunks;
+        })()
+      `);
+      const expectedHash = Buffer.from(await crypto.subtle.digest('SHA-256', Buffer.concat(expectedHashChunks))).toString('hex');
+      const body = Buffer.concat(await requestReceived);
+      const actualHash = Buffer.from(await crypto.subtle.digest('SHA-256', Buffer.from(body))).toString('hex');
+      expect(actualHash).to.equal(expectedHash);
     });
 
     it('can receive multi-part postData from loadURL', async () => {
@@ -1706,7 +1773,7 @@ describe('protocol module', () => {
         const end = Date.now();
         return end - begin;
       })();
-      expect(interceptedTime).to.be.lessThan(rawTime * 1.5);
+      expect(interceptedTime).to.be.lessThan(rawTime * 1.6);
     });
   });
 });

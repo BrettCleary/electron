@@ -2,7 +2,7 @@
 
 > Get system preferences.
 
-Process: [Main](../glossary.md#main-process)
+Process: [Main](../glossary.md#main-process), [Utility](../glossary.md#utility-process)
 
 ```js
 const { systemPreferences } = require('electron')
@@ -36,7 +36,7 @@ Returns `boolean` - Whether the Swipe between pages setting is on.
 ### `systemPreferences.postNotification(event, userInfo[, deliverImmediately])` _macOS_
 
 * `event` string
-* `userInfo` Record<string, any>
+* `userInfo` Record\<string, any\>
 * `deliverImmediately` boolean (optional) - `true` to post notifications immediately even when the subscribing app is inactive.
 
 Posts `event` as native notifications of macOS. The `userInfo` is an Object
@@ -45,7 +45,7 @@ that contains the user information dictionary sent along with the notification.
 ### `systemPreferences.postLocalNotification(event, userInfo)` _macOS_
 
 * `event` string
-* `userInfo` Record<string, any>
+* `userInfo` Record\<string, any\>
 
 Posts `event` as native notifications of macOS. The `userInfo` is an Object
 that contains the user information dictionary sent along with the notification.
@@ -53,7 +53,7 @@ that contains the user information dictionary sent along with the notification.
 ### `systemPreferences.postWorkspaceNotification(event, userInfo)` _macOS_
 
 * `event` string
-* `userInfo` Record<string, any>
+* `userInfo` Record\<string, any\>
 
 Posts `event` as native notifications of macOS. The `userInfo` is an Object
 that contains the user information dictionary sent along with the notification.
@@ -63,7 +63,7 @@ that contains the user information dictionary sent along with the notification.
 * `event` string | null
 * `callback` Function
   * `event` string
-  * `userInfo` Record<string, unknown>
+  * `userInfo` Record\<string, unknown\>
   * `object` string
 
 Returns `number` - The ID of this subscription
@@ -92,7 +92,7 @@ If `event` is null, the `NSDistributedNotificationCenter` doesn’t use it as cr
 * `event` string | null
 * `callback` Function
   * `event` string
-  * `userInfo` Record<string, unknown>
+  * `userInfo` Record\<string, unknown\>
   * `object` string
 
 Returns `number` - The ID of this subscription
@@ -107,7 +107,7 @@ If `event` is null, the `NSNotificationCenter` doesn’t use it as criteria for 
 * `event` string | null
 * `callback` Function
   * `event` string
-  * `userInfo` Record<string, unknown>
+  * `userInfo` Record\<string, unknown\>
   * `object` string
 
 Returns `number` - The ID of this subscription
@@ -137,7 +137,7 @@ Same as `unsubscribeNotification`, but removes the subscriber from `NSWorkspace.
 
 ### `systemPreferences.registerDefaults(defaults)` _macOS_
 
-* `defaults` Record<string, string | boolean | number> - a dictionary of (`key: value`) user defaults
+* `defaults` Record\<string, string | boolean | number\> - a dictionary of (`key: value`) user defaults
 
 Add the specified defaults to your application's `NSUserDefaults`.
 
@@ -401,9 +401,11 @@ Returns an object with system animation settings.
 
 ## Properties
 
-### `systemPreferences.accessibilityDisplayShouldReduceTransparency()` _macOS_
+### `systemPreferences.accessibilityDisplayShouldReduceTransparency` _macOS_ _Deprecated_
 
 A `boolean` property which determines whether the app avoids using semitransparent backgrounds. This maps to [NSWorkspace.accessibilityDisplayShouldReduceTransparency](https://developer.apple.com/documentation/appkit/nsworkspace/1533006-accessibilitydisplayshouldreduce)
+
+**Deprecated:** Use the new [`nativeTheme.prefersReducedTransparency`](native-theme.md#nativethemeprefersreducedtransparency-readonly) API.
 
 ### `systemPreferences.effectiveAppearance` _macOS_ _Readonly_
 

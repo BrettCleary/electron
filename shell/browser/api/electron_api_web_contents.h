@@ -13,48 +13,38 @@
 #include <utility>
 #include <vector>
 
+#include "base/functional/callback_forward.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/raw_ptr_exclusion.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
-#include "base/observer_list_types.h"
 #include "base/task/thread_pool.h"
-#include "chrome/browser/devtools/devtools_eye_dropper.h"
 #include "chrome/browser/devtools/devtools_file_system_indexer.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"  // nogncheck
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "content/common/frame.mojom.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/javascript_dialog_manager.h"
-#include "content/public/browser/keyboard_event_processing_result.h"
 #include "content/public/browser/render_widget_host.h"
-#include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "electron/buildflags/buildflags.h"
 #include "electron/shell/common/api/api.mojom.h"
 #include "gin/handle.h"
 #include "gin/wrappable.h"
-#include "mojo/public/cpp/bindings/receiver_set.h"
 #include "printing/buildflags/buildflags.h"
-#include "shell/browser/api/frame_subscriber.h"
 #include "shell/browser/api/save_page_handler.h"
 #include "shell/browser/background_throttling_source.h"
 #include "shell/browser/event_emitter_mixin.h"
 #include "shell/browser/extended_web_contents_observer.h"
-#include "shell/browser/ui/inspectable_web_contents.h"
 #include "shell/browser/ui/inspectable_web_contents_delegate.h"
 #include "shell/browser/ui/inspectable_web_contents_view_delegate.h"
 #include "shell/common/gin_helper/cleaned_up_at_exit.h"
 #include "shell/common/gin_helper/constructible.h"
-#include "shell/common/gin_helper/error_thrower.h"
 #include "shell/common/gin_helper/pinnable.h"
-#include "ui/base/cursor/cursor.h"
 #include "ui/base/models/image_model.h"
-#include "ui/gfx/image/image.h"
 
 #if BUILDFLAG(ENABLE_PRINTING)
-#include "components/printing/browser/print_to_pdf/pdf_print_result.h"
 #include "shell/browser/printing/print_view_manager_electron.h"
 #endif
 
@@ -71,18 +61,35 @@ struct DeviceEmulationParams;
 // enum class PermissionType;
 }  // namespace blink
 
-namespace gin_helper {
-class Dictionary;
-}
-
-namespace network {
-class ResourceRequestBody;
-}
+namespace content {
+enum class KeyboardEventProcessingResult;
+class WebContents;
+}  // namespace content
 
 namespace gin {
 class Arguments;
 }
 
+namespace gin_helper {
+class Dictionary;
+class ErrorThrower;
+template <typename T>
+class Promise;
+}  // namespace gin_helper
+
+namespace network {
+class ResourceRequestBody;
+}
+
+namespace print_to_pdf {
+enum class PdfPrintResult;
+}  // namespace print_to_pdf
+
+namespace ui {
+class Cursor;
+}
+
+class DevToolsEyeDropper;
 class SkRegion;
 
 namespace electron {
@@ -91,7 +98,6 @@ class ElectronBrowserContext;
 class InspectableWebContents;
 class WebContentsZoomController;
 class WebViewGuestDelegate;
-class FrameSubscriber;
 class WebDialogHelper;
 class NativeWindow;
 class OffScreenRenderWidgetHostView;
@@ -100,6 +106,7 @@ class OffScreenWebContentsView;
 namespace api {
 
 class BaseWindow;
+class FrameSubscriber;
 
 // Wrapper around the content::WebContents.
 class WebContents : public ExclusiveAccessContext,
@@ -110,7 +117,7 @@ class WebContents : public ExclusiveAccessContext,
                     public gin_helper::CleanedUpAtExit,
                     public content::WebContentsObserver,
                     public content::WebContentsDelegate,
-                    public content::RenderWidgetHost::InputEventObserver,
+                    private content::RenderWidgetHost::InputEventObserver,
                     public content::JavaScriptDialogManager,
                     public InspectableWebContentsDelegate,
                     public InspectableWebContentsViewDelegate,
@@ -169,7 +176,9 @@ class WebContents : public ExclusiveAccessContext,
   void Close(std::optional<gin_helper::Dictionary> options);
   base::WeakPtr<WebContents> GetWeakPtr() { return weak_factory_.GetWeakPtr(); }
 
+  // BackgroundThrottlingSource
   bool GetBackgroundThrottling() const override;
+
   void SetBackgroundThrottling(bool allowed);
   int GetProcessID() const;
   base::ProcessId GetOSProcessID() const;
@@ -194,6 +203,9 @@ class WebContents : public ExclusiveAccessContext,
   bool CanGoToIndex(int index) const;
   void GoToIndex(int index);
   int GetActiveIndex() const;
+  content::NavigationEntry* GetNavigationEntryAtIndex(int index) const;
+  bool RemoveNavigationEntryAtIndex(int index);
+  std::vector<content::NavigationEntry*> GetHistory() const;
   void ClearHistory();
   int GetHistoryLength() const;
   const std::string GetWebRTCIPHandlingPolicy() const;
@@ -235,7 +247,6 @@ class WebContents : public ExclusiveAccessContext,
 #if BUILDFLAG(ENABLE_PRINTING)
   void OnGetDeviceNameToUse(base::Value::Dict print_settings,
                             printing::CompletionCallback print_callback,
-                            bool silent,
                             // <error, device_name>
                             std::pair<std::string, std::u16string> info);
   void Print(gin::Arguments* args);
@@ -344,6 +355,7 @@ class WebContents : public ExclusiveAccessContext,
                                           const base::FilePath& file_path);
   v8::Local<v8::Promise> GetProcessMemoryInfo(v8::Isolate* isolate);
 
+  // content::WebContentsDelegate:
   bool HandleContextMenu(content::RenderFrameHost& render_frame_host,
                          const content::ContextMenuParams& params) override;
 
@@ -450,7 +462,6 @@ class WebContents : public ExclusiveAccessContext,
 
   // mojom::ElectronWebContentsUtility
   void OnFirstNonEmptyLayout(content::RenderFrameHost* render_frame_host);
-  void UpdateDraggableRegions(std::vector<mojom::DraggableRegionPtr> regions);
   void SetTemporaryZoomLevel(double level);
   void DoGetZoomLevel(
       electron::mojom::ElectronWebContentsUtility::DoGetZoomLevelCallback
@@ -557,7 +568,9 @@ class WebContents : public ExclusiveAccessContext,
                       bool* was_blocked) override;
   content::WebContents* OpenURLFromTab(
       content::WebContents* source,
-      const content::OpenURLParams& params) override;
+      const content::OpenURLParams& params,
+      base::OnceCallback<void(content::NavigationHandle&)>
+          navigation_handle_callback) override;
   void BeforeUnloadFired(content::WebContents* tab,
                          bool proceed,
                          bool* proceed_to_fire_unload) override;
@@ -566,15 +579,13 @@ class WebContents : public ExclusiveAccessContext,
   void CloseContents(content::WebContents* source) override;
   void ActivateContents(content::WebContents* contents) override;
   void UpdateTargetURL(content::WebContents* source, const GURL& url) override;
-  bool HandleKeyboardEvent(
-      content::WebContents* source,
-      const content::NativeWebKeyboardEvent& event) override;
-  bool PlatformHandleKeyboardEvent(
-      content::WebContents* source,
-      const content::NativeWebKeyboardEvent& event);
+  bool HandleKeyboardEvent(content::WebContents* source,
+                           const input::NativeWebKeyboardEvent& event) override;
+  bool PlatformHandleKeyboardEvent(content::WebContents* source,
+                                   const input::NativeWebKeyboardEvent& event);
   content::KeyboardEventProcessingResult PreHandleKeyboardEvent(
       content::WebContents* source,
-      const content::NativeWebKeyboardEvent& event) override;
+      const input::NativeWebKeyboardEvent& event) override;
   void ContentsZoomChange(bool zoom_in) override;
   void EnterFullscreenModeForTab(
       content::RenderFrameHost* requesting_frame,
@@ -619,6 +630,9 @@ class WebContents : public ExclusiveAccessContext,
   void OnAudioStateChanged(bool audible) override;
   void UpdatePreferredSize(content::WebContents* web_contents,
                            const gfx::Size& pref_size) override;
+  void DraggableRegionsChanged(
+      const std::vector<blink::mojom::DraggableRegionPtr>& regions,
+      content::WebContents* contents) override;
 
   // content::WebContentsObserver:
   void BeforeUnloadFired(bool proceed) override;
@@ -712,15 +726,12 @@ class WebContents : public ExclusiveAccessContext,
   void EnterFullscreen(const GURL& url,
                        ExclusiveAccessBubbleType bubble_type,
                        const int64_t display_id) override;
-  void ExitFullscreen() override;
-  void UpdateExclusiveAccessExitBubbleContent(
-      const GURL& url,
-      ExclusiveAccessBubbleType bubble_type,
-      ExclusiveAccessBubbleHideCallback bubble_first_hide_callback,
-      bool notify_download,
-      bool force_update) override;
-  void OnExclusiveAccessUserInput() override;
-  content::WebContents* GetActiveWebContents() override;
+  void ExitFullscreen() override {}
+  void UpdateExclusiveAccessBubble(
+      const ExclusiveAccessBubbleParams& params,
+      ExclusiveAccessBubbleHideCallback bubble_first_hide_callback) override {}
+  void OnExclusiveAccessUserInput() override {}
+  content::WebContents* GetWebContentsForExclusiveAccess() override;
   bool CanUserExitFullscreen() const override;
   bool IsExclusiveAccessBubbleDisplayed() const override;
 
@@ -736,7 +747,8 @@ class WebContents : public ExclusiveAccessContext,
   // InspectableWebContentsDelegate:
   void DevToolsSaveToFile(const std::string& url,
                           const std::string& content,
-                          bool save_as) override;
+                          bool save_as,
+                          bool is_base64) override;
   void DevToolsAppendToFile(const std::string& url,
                             const std::string& content) override;
   void DevToolsRequestFileSystems() override;
@@ -748,6 +760,7 @@ class WebContents : public ExclusiveAccessContext,
                          const std::string& file_system_path,
                          const std::string& excluded_folders_message) override;
   void DevToolsOpenInNewTab(const std::string& url) override;
+  void DevToolsOpenSearchResultsInNewTab(const std::string& query) override;
   void DevToolsStopIndexing(int request_id) override;
   void DevToolsSearchInPath(int request_id,
                             const std::string& file_system_path,

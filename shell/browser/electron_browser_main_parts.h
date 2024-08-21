@@ -9,15 +9,13 @@
 #include <optional>
 #include <string>
 
-#include "base/functional/callback.h"
+#include "base/functional/callback_forward.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/timer/timer.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "electron/buildflags/buildflags.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/geolocation_control.mojom.h"
-#include "ui/display/screen.h"
 #include "ui/views/layout/layout_provider.h"
 
 class BrowserProcessImpl;
@@ -26,6 +24,11 @@ class IconManager;
 namespace base {
 class FieldTrialList;
 }
+
+namespace display {
+class Screen;
+class ScopedNativeScreen;
+}  // namespace display
 
 #if defined(USE_AURA)
 namespace wm {
@@ -155,10 +158,10 @@ class ElectronBrowserMainParts : public content::BrowserMainParts {
   // Before then, we just exit() without any intermediate steps.
   std::optional<int> exit_code_;
 
-  std::unique_ptr<NodeBindings> node_bindings_;
+  const std::unique_ptr<NodeBindings> node_bindings_;
 
   // depends-on: node_bindings_
-  std::unique_ptr<ElectronBindings> electron_bindings_;
+  const std::unique_ptr<ElectronBindings> electron_bindings_;
 
   // depends-on: node_bindings_
   std::unique_ptr<JavascriptEnvironment> js_env_;

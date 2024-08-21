@@ -10,7 +10,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/command_line.h"
 #include "base/functional/bind.h"
 #include "base/no_destructor.h"
 #include "base/path_service.h"
@@ -19,7 +18,6 @@
 #include "chrome/common/chrome_paths.h"
 #include "components/upload_list/crash_upload_list.h"
 #include "components/upload_list/text_log_upload_list.h"
-#include "content/public/common/content_switches.h"
 #include "gin/arguments.h"
 #include "gin/data_object_builder.h"
 #include "shell/common/electron_paths.h"

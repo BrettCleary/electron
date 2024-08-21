@@ -7,13 +7,13 @@
 
 #include <memory>
 
-#include "base/functional/callback.h"
+#include "base/functional/callback_forward.h"
 #include "base/memory/shared_memory_mapping.h"
 #include "components/viz/host/host_display_client.h"
 #include "services/viz/privileged/mojom/compositing/layered_window_updater.mojom.h"
-#include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/skia/include/core/SkCanvas.h"
-#include "ui/gfx/native_widget_types.h"
+
+class SkBitmap;
+class SkCanvas;
 
 namespace electron {
 
@@ -63,6 +63,7 @@ class OffScreenHostDisplayClient : public viz::HostDisplayClient {
   void SetActive(bool active);
 
  private:
+  // viz::HostDisplayClient
 #if BUILDFLAG(IS_MAC)
   void OnDisplayReceivedCALayerParams(
       const gfx::CALayerParams& ca_layer_params) override;

@@ -9,13 +9,11 @@
 #include <string>
 #include <vector>
 
-#include "base/compiler_specific.h"
-#include "build/build_config.h"
 #include "extensions/browser/extensions_browser_client.h"
 #include "extensions/browser/kiosk/kiosk_delegate.h"
-#include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/mojom/fetch_api.mojom.h"
+#include "url/origin.h"
 
 class PrefService;
 
@@ -27,6 +25,13 @@ class ElectronProcessManagerDelegate;
 class ProcessMap;
 class ElectronComponentExtensionResourceManager;
 }  // namespace extensions
+
+namespace mojo {
+template <typename T>
+class PendingReceiver;
+template <typename T>
+class PendingRemote;
+}  // namespace mojo
 
 namespace electron {
 
@@ -93,7 +98,8 @@ class ElectronExtensionsBrowserClient
       bool is_incognito,
       const extensions::Extension* extension,
       const extensions::ExtensionSet& extensions,
-      const extensions::ProcessMap& process_map) override;
+      const extensions::ProcessMap& process_map,
+      const GURL& upstream_url) override;
   PrefService* GetPrefServiceForContext(
       content::BrowserContext* context) override;
   void GetEarlyExtensionPrefsObservers(
@@ -104,6 +110,7 @@ class ElectronExtensionsBrowserClient
       const override;
   mojo::PendingRemote<network::mojom::URLLoaderFactory>
   GetControlledFrameEmbedderURLLoader(
+      const url::Origin& app_origin,
       int frame_tree_node_id,
       content::BrowserContext* browser_context) override;
   std::unique_ptr<extensions::ExtensionHostDelegate>
